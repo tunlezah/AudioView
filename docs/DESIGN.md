@@ -240,7 +240,27 @@ Reasons:
 1. **We need the pipe anyway.** Track metadata and artwork only exist there. Hooks would be a *second* event source that must be reconciled with the first, and reconciling two clocks is strictly worse than reading one.
 2. **Ordering.** Hook processes are forked and scheduled independently. There is no guarantee that a hook's side effect lands before or after the corresponding pipe items. With one source, ordering is the stream order, by definition.
 3. **Hooks can stall audio.** With `wait_for_completion` set, shairport-sync blocks on the hook before starting playback. A slow script becomes audible latency. Without it, ordering gets worse.
-4. **Resolution.** The pipe distinguishes `abeg` (session up) from `pbeg` (stream starting) from `pffr` (audio genuinely flowing). Hooks collapse this to one edge. We want `abeg` for the amp — it gives the amplifier a few hundred milliseconds to unmute before the first note — and `pffr` for the display, so we don't wake the panel on a session that never plays.
+4. **Resolution.** The pipe distinguishes `abeg` (active mode entered) from `pbeg` (stream starting) from `pffr` (audio genuinely flowing). Hooks collapse this to one edge. See §5.1.1 — this distinction is what makes correct amp control possible.
+
+#### 5.1.1 `abeg`/`aend` vs `pbeg`/`pend` — and why the amp uses the former
+
+These are two different scopes, and confusing them produces a device that clicks its amplifier relay between every track.
+
+| | `pbeg` / `pend` | `abeg` / `aend` |
+|---|---|---|
+| Scope | One audio stream | The whole listening session |
+| AirPlay 2 behaviour | Fires around **each track** | Fires once at the start, once at the end |
+| Trailing edge | Immediate | Delayed by `active_state_timeout` (default 10s) |
+| Four-track listen | 4 × begin/end pairs | 1 × begin/end pair |
+
+shairport-sync enters *active mode* when audio first arrives and stays active across the gaps between tracks. When audio stops it starts a timer; if audio resumes before `active_state_timeout` expires it never leaves active mode, and only a real stop produces `aend`. Upstream is explicit that play events "have been superseded by Active/Inactive events, which works better in AirPlay 2 operation."
+
+Consequences for us:
+
+- **Amp trigger keys off `abeg`/`aend`.** Built-in hysteresis, one relay transition per listening session. Our own `off_delay` (10 min) would mask the flapping anyway, but relying on a long delay to paper over a wrong signal is the kind of thing that breaks when someone shortens the delay.
+- **Display blanking keys off `Idle`, which is entered on `aend` — not on `pend`.** Between tracks the state machine sits in `Active`, so the blank countdown never starts mid-album. This is load-bearing: keying the blank timer off `pend` would start a countdown between every track.
+- **`pbeg`/`pend`/`pffr` still drive the display wake and the playing/paused indication**, because there we *want* per-track resolution.
+- We set `active_state_timeout` explicitly in the shipped shairport-sync config rather than inheriting the default, so our timing assumptions are written down in one place.
 
 **Abrupt client disconnect** is the failure mode hooks are usually reached for, so it needs a real answer:
 
@@ -274,6 +294,7 @@ stateDiagram-v2
 
 Notes:
 
+- **The `Active ⇄ Starting ⇄ Playing` loop is the normal case, not an edge case.** Per §5.1.1, `pbeg`/`pend` cycle once per track, so a four-track album traverses that loop four times inside a single `abeg`…`aend` envelope. Nothing outside the loop — amp state, display blanking — may be driven from those transitions.
 - **Senders that never emit `abeg`/`aend`.** These are AirPlay-2-era codes; AirPlay 1 senders and some third-party ones skip them. `pbeg` therefore implicitly enters `Active` first. Symmetrically, `pend` with no `aend` within `session_timeout` falls through to `Idle`.
 - **`Starting` exists** so we don't wake the panel for a session that connects and never plays. If `pffr` never arrives, we stay dark.
 - **Metadata bundles are transactional.** `core` items between `mdst` and `mden` accumulate into a pending track; the track is committed — and a `track_changed` event emitted — only at `mden`. A bundle interrupted by `pend` is discarded. This prevents the classic flicker where artist updates one frame before title.
@@ -423,9 +444,11 @@ gpio_chip   = "auto"
 gpio_line   = 17
 active_low  = false
 pulse_ms    = 0        # 0 = hold level while on; >0 = momentary pulse for toggle-style amps
-on_event    = "session_begin"   # abeg — early, so the amp unmutes before the first note
+on_event    = "session_begin"   # abeg — one transition per listening session (§5.1.1)
 off_delay   = "10m"             # after entering Idle
 ```
+
+`on_event = "play_begin"` (`pbeg`) is available but **not recommended**: it fires per track, so the relay would cycle between songs. It exists for amplifiers whose trigger input is genuinely momentary.
 
 **Hardware requirement, documented in the build guide:** the optocoupler input must have a pull-down (or pull-up, if `active_low`) resistor to a safe state. When `artd` exits, the kernel releases the GPIO request and the line reverts to its default — without an external resistor, a crash could leave the amplifier powered indefinitely. `artd` also drives the line off in its `ExecStop` and on `SIGTERM`, but that only covers clean shutdown; the resistor covers the rest.
 
@@ -433,11 +456,13 @@ Both amp and display transitions are debounced (default 2s) so a track skip that
 
 **Display power** is requested by `artd` and executed by `lprender`:
 
-| Idle duration | `power.display` | Renderer behaviour |
+| Time in `Idle` | `power.display` | Renderer behaviour |
 |---|---|---|
 | 0 | `on` | Artwork at full brightness |
 | > `ambient_after` (default off) | `ambient` | Blurred, dimmed last artwork |
 | > `blank_after` (default 5m) | `off` | Fade to black over 1s, then CRTC `ACTIVE=0` |
+
+The clock starts on entry to `Idle` (i.e. on `aend`), **not** on `pend` — see §5.1.1. Gaps between tracks leave the state machine in `Active`, where the display stays fully on and no countdown runs.
 
 Wake is instant on `abeg`/`pbeg`: CRTC on, fade in from black.
 
@@ -475,9 +500,50 @@ One known Pi 5 issue avoided by construction: `DRM_MODE_PAGE_FLIP_ASYNC` is brok
 
 ### 6.3 Render pipeline
 
-**Square, resolution-agnostic.** Let `s = min(mode.hdisplay, mode.vdisplay)`. The whole framebuffer clears to black; the viewport is an `s × s` square centred in it. A 1:1 panel is full-bleed; anything else letterboxes or pillarboxes. Rotation (`display.rotation = 0|90|180|270`) is applied as a rotation in the vertex shader rather than via the plane `rotation` property — the property is not guaranteed present on every plane, and the shader path is identical on the dev backend.
+**Square, resolution-agnostic.** Let `s = min(mode.hdisplay, mode.vdisplay)`. The art area is an `s × s` square centred in the framebuffer. A 1:1 panel is full-bleed; anything else has a remainder, and §6.3.1 covers what goes in it.
+
+Rotation (`display.rotation = 0|90|180|270`) is applied in the vertex shader rather than via the plane `rotation` property — the property is not guaranteed present on every plane, and the shader path is identical on the dev backend. Odd rotations swap the width/height inputs to the square computation.
 
 **Aspect handling within the square.** Cover art is nominally square but not always. `render.fit = "cover" | "contain"`, default `cover` — crop to fill, because a full-bleed LP sleeve is the entire point.
+
+#### 6.3.1 Panel compatibility
+
+True 1:1 panels are scarce and expensive, so the renderer must look deliberate on whatever hardware is actually available — a 16:9 monitor turned portrait, a spare 4:3 panel, a small DSI screen, or a TV. Nothing here is specific to square displays; the square art area is a *policy*, and the policy is configurable.
+
+**What fills the remainder** (`render.background`, only visible on non-1:1 panels):
+
+| Value | Result |
+|---|---|
+| `black` | Hard letterbox/pillarbox. Purest, and correct for a framed LP sleeve. |
+| `blur` *(default)* | The artwork scaled to fill the whole panel, heavily blurred and dimmed to `background_dim` (default 0.35), with the sharp square floating over it. The same treatment Apple TV and Plex use for non-matching aspect ratios, and the reason it is the default: it makes a 16:9 panel look intentional rather than broken. Reuses the dual-Kawase chain already written for ambient mode, so it costs no new code. |
+| `dominant` | Flat fill in the artwork's dominant colour (OKLab k-means, k=3). Cheapest, and good on e-ink-ish or low-bandwidth panels. |
+| `gradient` | Vertical gradient between the two leading dominant colours. |
+
+The background is rendered once per artwork change and cached in an FBO, not recomputed per frame, so it does not affect the "static image = zero page flips" property.
+
+**Escaping the square entirely.** `render.square = false` drops the square constraint and applies `fit` against the full panel — `cover` fills a 16:9 screen edge to edge by cropping the top and bottom off the sleeve, `contain` shows the whole sleeve with a background. For the LP-frame use case `square = true` is right; for someone reusing this on a widescreen monitor it is not.
+
+**Modes and EDID.**
+
+- `display.mode = "auto"` takes the connector's preferred mode. `"highest"` takes the highest resolution at the highest refresh. An explicit `"1920x1920@60"` overrides both, and is validated with a `TEST_ONLY` atomic commit before being applied — an unsupported mode is reported rather than producing a black screen.
+- Panels with absent or wrong EDID — common on cheap HDMI→eDP driver boards, and a live risk for the 1920×1920 target — are handled by the explicit mode plus documented `hdmi_timings` in `config.txt`. The build guide walks through deriving those from the panel datasheet with `cvt`/`gtf` and verifying with `kmsprint`.
+- Multiple connected connectors: `display.connector = "auto"` picks the first connected; name it explicitly (`"HDMI-A-1"`, `"DSI-1"`) when that is ambiguous. We never mirror or span.
+- **Non-HDMI panels work unchanged.** DSI and DPI panels (including the Waveshare round and square DSI range) present as ordinary KMS connectors, so the entire render path is identical. This is a benefit of going straight to KMS rather than through a compositor.
+- `display.margin_percent` insets everything by a percentage, for TVs that overscan.
+
+**Scaling quality.** Mipmaps plus anisotropic filtering where the extension is present. Upscaling matters more than downscaling here: a 1080p or 4K TV receiving 500×500 AirPlay art looks genuinely bad, which is a second, independent argument for the enrichment pipeline. When the source is smaller than the art area by more than 2×, we apply a mild Catmull-Rom upscale in the fragment shader instead of plain bilinear.
+
+**Compatibility matrix** (all exercised via the SDL2 backend at arbitrary window sizes in CI):
+
+| Panel | Result |
+|---|---|
+| 1920×1920, 720×720 (1:1) | Full-bleed, no background visible |
+| 1920×1080, 3840×2160 (16:9) | Square art centred, blurred background either side |
+| 1080×1920 (portrait 9:16) | Square art centred, background above and below |
+| 1024×768, 800×600 (4:3) | Square art centred, narrow background margins |
+| 3440×1440 (21:9) | Square art centred, wide background margins |
+| 480×480, 720×720 DSI round/square | Full-bleed |
+| Rotated 90/270 | Dimensions swapped before the square computation |
 
 **Texture path.** Decode happens on a worker thread; the render thread never touches libjpeg.
 
@@ -521,9 +587,22 @@ Standalone mode for all three: `lprender --slideshow ./pictures --interval 5s` r
 
 ---
 
-## 7. Configuration
+## 7. Configuration and the web interface
 
-Single TOML file, `/etc/lpframe/config.toml`, read by both daemons. Validated on load; a malformed config fails the service loudly rather than falling back to defaults silently. `SIGHUP` reloads everything except display mode and GPIO line.
+### 7.1 Layered config files
+
+Two files, merged, with the second winning per-key:
+
+| File | Owner | Writable |
+|---|---|---|
+| `/etc/lpframe/config.toml` | The package. Ships with defaults and installer-set values. | No (read-only root under overlayfs) |
+| `/var/lib/lpframe/config.local.toml` | The web interface. Only keys the user has actually changed. | Yes |
+
+This split exists because of overlayfs. With a read-only root, anything written to `/etc` evaporates at reboot — so a web UI that edited `/etc/lpframe/config.toml` would appear to work and then silently forget everything on power-cycle. Keeping user changes on the writable partition, as a sparse override file, also makes "reset this setting to default" a deletion rather than a guess about what the default was, and keeps `/etc` diffable against the package.
+
+Both daemons load the merged view. Validated on load; a malformed config fails the service loudly rather than silently reverting to defaults.
+
+### 7.2 Config file
 
 ```toml
 [device]
@@ -535,13 +614,17 @@ alsa_device = "hw:CARD=KA11,DEV=0"
 mixer = "PCM"                  # "" to disable hardware volume
 
 [display]
-connector = "auto"             # or "HDMI-A-1"
-mode = "auto"                  # or "1920x1920@60"
+connector = "auto"             # or "HDMI-A-1", "DSI-1"
+mode = "auto"                  # auto | highest | "1920x1920@60"
 rotation = 0                   # 0 | 90 | 180 | 270
 card = "auto"
+margin_percent = 0             # inset, for TVs that overscan
 
 [render]
+square = true                  # false = fill the panel, ignore the 1:1 constraint
 fit = "cover"                  # cover | contain
+background = "blur"            # black | blur | dominant | gradient  (non-1:1 panels only)
+background_dim = 0.35
 crossfade_ms = 600
 enrichment_crossfade_ms = 250
 ken_burns = false
@@ -586,10 +669,58 @@ session = "60s"
 [ipc]
 socket = "/run/lpframe/artd.sock"
 
+[web]
+enabled = true
+bind = "0.0.0.0:8730"          # "127.0.0.1:8730" to require an SSH tunnel
+auth = true                    # password generated at install
+mdns = true                    # advertise http://lpframe.local:8730
+
 [logging]
 level = "info"
-status_page = false            # bind 127.0.0.1:8730 when true
 ```
+
+### 7.3 The web interface
+
+Served by `artd` on `http://lpframe.local:8730` (mDNS-advertised via the Avahi stack AirPlay already needs, so there is no IP address to hunt for).
+
+This was originally scoped as a loopback debug page. It is now a real component: with no buttons, no screen controls, and no keyboard, it is the only way to configure a running device short of SSH.
+
+**Pages**
+
+1. **Now Playing** — live artwork, artist/album/title, playback state, artwork source badge (`airplay` / `itunes` / `cache`), and whether enrichment upgraded, is pending, or was rejected.
+2. **Settings** — the config, grouped and typed. Timings, ambient mode, enrichment, display fit/background/rotation, amp behaviour. Overridden values are marked, each with a one-click reset to default.
+3. **Diagnostics** — recent event log, every enrichment decision with its match scores and the reason for rejection, cache size and hit rate, GPIO state, the negotiated DRM mode and connector, service health.
+
+**Transport.** The state snapshot that already goes to `lprender` over the Unix socket is re-broadcast to browsers as Server-Sent Events on `/api/events`. Same payload, same `seq`, one broadcaster. SSE rather than WebSocket because reconnection is built into `EventSource` and we only need one direction.
+
+```
+GET   /api/state                 current snapshot
+GET   /api/events                SSE stream of snapshots
+GET   /api/config                merged config + which keys are overridden + defaults
+PATCH /api/config                sparse update; validated, then written to config.local.toml
+POST  /api/config/reset          {"keys": ["render.ambient"]} → drop the override
+GET   /api/artwork/current       512px JPEG thumbnail (never the 3000px original)
+POST  /api/actions/<action>      amp_on | amp_off | display_wake | cache_clear | reprobe_display
+```
+
+**Applying changes.** Writes go to `config.local.toml` atomically (temp file, `fsync`, `rename`) and only after validating the merged result. Settings fall into three tiers, labelled as such in the UI:
+
+- **Live** — timings, enrichment, ambient, fit, background, crossfade, amp delays. Applied in-process, no restart.
+- **Needs `lprender` restart** — rotation, mode, connector, card.
+- **Needs `artd` restart** — GPIO chip/line, socket path, web bind.
+
+The UI offers a one-click restart for the latter two.
+
+**Confirm-or-revert on display changes.** Applying rotation or mode starts a 15-second countdown; if you do not click *Keep this*, it reverts. Borrowed from desktop display settings, for the same reason: a wrong mode on a headless appliance with no input device is otherwise a reflash.
+
+**Auth and threat model.** Default is LAN-bound with a password, because the alternative — an unauthenticated page on the LAN — exposes listening history and lets any device on the network toggle outbound API calls.
+
+- The installer generates a random passphrase, writes it to `/var/lib/lpframe/web-password.txt` (0600), prints it at the end of the install, and `lpctl web-password` reprints it. Stored as an Argon2id hash in `config.local.toml`.
+- Session cookie, `HttpOnly` + `SameSite=Strict` (which also handles CSRF), 30-day expiry. Login is rate-limited to 5 attempts/minute with constant-time comparison.
+- **Plain HTTP, stated plainly:** this protects against other people and devices casually reaching the page on your network. It does *not* protect against someone who can passively sniff your LAN — the password crosses in the clear. If that is in your threat model, set `web.bind = "127.0.0.1:8730"` and use an SSH tunnel, or front it with a TLS-terminating reverse proxy. We do not ship self-signed TLS; it trains people to click through certificate warnings and buys nothing here.
+- **Do not port-forward this.** The build guide says so in a box. There is no WAN mode, no remote access feature, and no cloud component.
+
+**Implementation.** `axum` inside `artd`. Assets embedded in the binary via `rust-embed` — vanilla JS and one stylesheet, no npm, no build step, and critically no CDN references, since the device is frequently offline and a settings page that needs internet access to render would be useless exactly when you need it. Roughly 30 KB total, dark theme.
 
 ---
 
@@ -640,14 +771,14 @@ RestrictAddressFamilies=AF_UNIX
 
 ### 8.3 SD-card longevity
 
-- **Overlayfs root** (`raspi-config` → Performance → Overlay File System) for production. `/var/lib/lpframe` moves to a small dedicated writable partition so the artwork cache survives reboots; if that is skipped, the cache becomes RAM-only and simply re-fetches, which is a legitimate configuration.
+- **Overlayfs root** (`raspi-config` → Performance → Overlay File System) for production. `/var/lib/lpframe` moves to a small dedicated writable partition so the artwork cache **and the web interface's `config.local.toml`** survive reboots. This partition is not optional once the web UI exists — without it, every setting change is forgotten at power-cycle.
 - `journald` `Storage=volatile`, `RuntimeMaxUse=32M`.
 - `logrotate` for anything on disk; `noatime` mount options.
 - Helper scripts `lpframe-rw` / `lpframe-ro` to toggle the overlay for maintenance.
 
-### 8.4 Status page (optional, default off)
+### 8.4 Web interface
 
-When `logging.status_page = true`, `artd` binds `127.0.0.1:8730` and serves one page: current state, last 50 events, enrichment hits/misses/rejections with scores, cache size, GPIO state. No controls, no auth, loopback only. Reachable over SSH port-forward. This exists to debug enrichment rejections in the field, which is otherwise guesswork.
+See §7.3. `artd` binds the listener itself, so there is no extra unit. Because `config.local.toml` lives on the writable partition, the interface keeps working under a read-only root — this is the main reason for the config split.
 
 ---
 
@@ -661,7 +792,8 @@ When `logging.status_page = true`, `artd` binds `127.0.0.1:8730` and serves one 
 | `artd` power | Fake GPIO backend recording `(timestamp, level)`; assert debounce and delays with the fake clock |
 | Enrichment | `wiremock` for iTunes/MB/CAA; cassettes recorded from the real APIs via `--record`. Gate tests use a corpus of correct-match and known-wrong-match image pairs |
 | Cache | LRU eviction, crash-safety (kill mid-write, assert index consistency) |
-| `lprender` | Headless EGL golden images at fixed crossfade points; state-machine tests against a mock `artd` |
+| `lprender` | Headless EGL golden images at fixed crossfade points; state-machine tests against a mock `artd`. Golden images rendered at every aspect ratio in the §6.3.1 matrix, so a layout regression on 16:9 is caught without a 16:9 panel |
+| Web interface | API contract tests; config-layering round-trips (override → merge → reset); auth (rate limit, cookie flags, constant-time compare); validation rejects bad config without corrupting `config.local.toml`; confirm-or-revert times out correctly |
 | Integration | `docker-compose`: real shairport-sync fed a synthetic AirPlay stream, real `artd`, headless `lprender` |
 
 CI (GitHub Actions): x86_64 build + full test suite + clippy + rustfmt; aarch64 cross-build producing a `.deb` artifact. Golden-image tests run under `llvmpipe`.
@@ -702,10 +834,13 @@ Following the requested order. Each milestone ends with something demonstrable.
 | 4 | Integration | Renderer driven by `artd`. Play from a phone → art appears and crossfades. **This is the first end-to-end device.** |
 | 5 | Enrichment | iTunes + MusicBrainz, both gates, cache, rate limiting. |
 | 6 | Power management | GPIO amp trigger, display blanking, ambient mode, fade-to-black + CRTC off. |
-| 7 | Provisioning | `install.sh`, `.deb`, systemd units, overlayfs, and the full `docs/BUILD.md` from clean flash to working device. |
-| 8 | *Bonus* | `pi-gen` stage producing a flashable image, built in CI. |
+| 7 | Web interface | Config layering, settings/diagnostics UI, auth, confirm-or-revert. |
+| 8 | Provisioning | `install.sh`, `.deb`, systemd units, overlayfs, writable partition, and the full `docs/BUILD.md` from clean flash to working device. |
+| 9 | *Bonus* | `pi-gen` stage producing a flashable image, built in CI. |
 
 Milestones 2 and 3 are independent and can be built in either order or in parallel.
+
+The **read-only Now Playing and Diagnostics pages land early, at milestone 2** — once the snapshot broadcaster exists, exposing it over SSE is nearly free, and having a live view of the state machine makes milestones 4–6 substantially easier to debug. Only the settings-editing half waits for milestone 7, since it needs the config layering and auth to be right.
 
 ---
 
@@ -721,6 +856,8 @@ Milestones 2 and 3 are independent and can be built in either order or in parall
 | AirPlay 2 needs specific ports | 7000/tcp, 319+320/udp, 5353 mDNS. Documented; installer configures the firewall if one is present. |
 | shairport-sync AP2 build drift | Pin to a tagged release, record the exact `./configure` line, verify `-V` reports `AirPlay2`. |
 | SD-card wear | Overlayfs root, volatile journald, cache on a separate partition. |
+| Web UI is an unauthenticated-by-default footgun | Auth on by default with an installer-generated password; explicit threat model and a "do not port-forward" warning in the build guide (§7.3). |
+| A bad display setting bricks a headless device | `TEST_ONLY` validation before applying, plus 15-second confirm-or-revert on rotation and mode changes. |
 
 ---
 
@@ -734,24 +871,27 @@ Summarising the four open questions, plus one I am adding:
 4. **Atomic vs. legacy DRM** → **Atomic.** Legacy is a shim over the same atomic helpers on `vc4`, so it buys nothing; atomic gives `TEST_ONLY` validation, glitch-free single-commit modesets, and clean `ACTIVE=0` panel-off. **Fades are done in the fragment shader, not via gamma LUT**, because vc4 gamma support is inconsistent across BCM2711/2712 (§6.1).
 5. **Added: snapshot IPC, not deltas.** Every state change sends the full state object. Late joiners and reconnects are correct by construction. Messages are small and infrequent enough that there is no efficiency case for deltas (§5.3).
 
-### Things I would like your call on
+### Settled in review
 
-- **Amp-on trigger point.** I have defaulted to `abeg` (session established) rather than `pbeg` (stream starting), so the amp has time to unmute before the first note. This does mean the amp powers on when someone connects and then doesn't play. Happy to switch the default to `pbeg`.
-- **Default idle timings.** Screen blanks after 5 minutes, amp cuts after 10. Both configurable; these are guesses at what feels right in a living room.
-- **Ambient mode default.** Currently off. It looks good but it keeps the panel lit, which works against the "<2W idle" goal.
-- **Enrichment on by default.** It sends artist/album to Apple. Reasonable default for this device, but it is your device.
+- **Amp-on trigger** → `abeg`. Confirmed after establishing that `pbeg`/`pend` fire per *track* in AirPlay 2 (§5.1.1); `pbeg` would cycle the relay between songs.
+- **Idle timings** → 5 min to blank, 10 min to amp-off, and adjustable from the web interface.
+- **Ambient mode** → off by default, toggleable in the web interface.
+- **Enrichment** → on by default, toggleable in the web interface.
+- **Web interface** → promoted from an optional loopback debug page to a first-class component (§7.3), which pulled in the layered config design (§7.1) and made the writable partition mandatory (§8.3).
+- **Panel compatibility** → the square art area is a policy, not an assumption (§6.3.1). Any resolution, aspect, orientation, or connector type; blurred-fill background by default so non-1:1 panels look deliberate.
 
 ---
 
 ## 13. Non-goals for v1
 
-No touch UI. No web UI beyond the optional loopback status page. No local library playback. No Spotify Connect — though `artd`'s internal boundary between "metadata source" and "state machine" is a trait, so a second source is an additive change rather than a refactor. No custom iOS app; public catalogue APIs replace Pentaton's proprietary full-resolution side channel.
+No touch UI. No local library playback. No Spotify Connect — though `artd`'s internal boundary between "metadata source" and "state machine" is a trait, so a second source is an additive change rather than a refactor. No custom iOS app; public catalogue APIs replace Pentaton's proprietary full-resolution side channel. No remote or cloud access to the web interface — LAN only, by design.
 
 ---
 
 ## Appendix A — References
 
 - shairport-sync metadata format and codes — [shairport-sync-metadata-reader](https://github.com/mikebrady/shairport-sync-metadata-reader)
+- Active/Inactive vs Play events, `active_state_timeout` — [shairport-sync Events.md](https://github.com/mikebrady/shairport-sync/blob/master/ADVANCED%20TOPICS/Events.md)
 - [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/index.html) — 3000×3000 artwork ceiling, ~20 req/min fair use
 - [drm/vc4 kernel documentation](https://docs.kernel.org/gpu/vc4.html)
 - [BCM2712 / Pi 5 display support in vc4](https://patchew.org/linux/20241025-drm-vc4-2712-support-v2-0-35efa83c8fc0@raspberrypi.com/)
