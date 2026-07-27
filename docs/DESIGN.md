@@ -1,6 +1,6 @@
 # LP Frame — Design Document
 
-**Status:** Draft, awaiting sign-off
+**Status:** Signed off; implementation in progress
 **Repo:** `tunlezah/AudioView`
 **Product:** A vinyl-LP-sized wall/shelf display that shows the cover art of whatever is currently AirPlaying to it, and nothing else.
 
@@ -828,7 +828,7 @@ Following the requested order. Each milestone ends with something demonstrable.
 
 | # | Milestone | Deliverable |
 |---|---|---|
-| 1 | `spmeta` parser | Library + fixture tests. `lpcapture` ships here too, since we need real captures to test against. |
+| 1 | `spmeta` parser | **Done.** Library + fixture tests, `lpcapture`, synthetic fixture set, CI. |
 | 2 | `artd` core | State machine, IPC server, AirPlay-art-only path. `lpctl watch` prints live state from a phone. |
 | 3 | `lprender` static/slideshow | DRM + SDL2 backends, crossfade, square letterboxing. `--slideshow` on a directory, no `artd`. |
 | 4 | Integration | Renderer driven by `artd`. Play from a phone → art appears and crossfades. **This is the first end-to-end device.** |

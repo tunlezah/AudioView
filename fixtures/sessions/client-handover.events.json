@@ -1,0 +1,154 @@
+[
+  {
+    "event": "client_name",
+    "detail": "Ben's iPhone"
+  },
+  {
+    "event": "user_agent",
+    "detail": "AirPlay/845.5.1"
+  },
+  {
+    "event": "client_ip",
+    "detail": "192.168.1.42"
+  },
+  {
+    "event": "server_ip",
+    "detail": "192.168.1.10"
+  },
+  {
+    "event": "active_begin"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Burial"
+  },
+  {
+    "event": "core",
+    "detail": "album=Untrue"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Burial"
+  },
+  {
+    "event": "core",
+    "detail": "title=Archangel"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=2"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=231000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0000000000000051"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:d583771dca19594b"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "client_name",
+    "detail": "Living Room Mac"
+  },
+  {
+    "event": "user_agent",
+    "detail": "AirPlay/860.7.1"
+  },
+  {
+    "event": "client_ip",
+    "detail": "192.168.1.42"
+  },
+  {
+    "event": "server_ip",
+    "detail": "192.168.1.10"
+  },
+  {
+    "event": "active_begin"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Four Tet"
+  },
+  {
+    "event": "core",
+    "detail": "album=Rounds"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Four Tet"
+  },
+  {
+    "event": "core",
+    "detail": "title=She Moves She"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=3"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=254000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0000000000000052"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:c2422fc0d704e2bc"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "play_end"
+  },
+  {
+    "event": "active_end"
+  }
+]

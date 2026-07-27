@@ -18,6 +18,27 @@ Square panels are the intent, but any resolution, aspect ratio, orientation, or 
 
 ## Status
 
-Design phase. See **[docs/DESIGN.md](docs/DESIGN.md)**.
+Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 
-Build guide (`docs/BUILD.md`) lands with milestone 7.
+| # | Milestone | |
+|---|---|---|
+| 1 | `spmeta` parser + `lpcapture` | done |
+| 2 | `artd` core | next |
+| 3 | `lprender` static/slideshow | |
+| 4 | Integration | |
+| 5 | Enrichment | |
+| 6 | Power management | |
+| 7 | Web interface | |
+| 8 | Provisioning + `docs/BUILD.md` | |
+
+## Developing
+
+Everything builds and tests on an ordinary Linux box — no Pi required.
+
+```bash
+make check      # fmt, clippy, tests, fixture verification (what CI runs)
+make fixtures   # regenerate synthetic fixtures and golden logs
+```
+
+See [fixtures/README.md](fixtures/README.md) for recording real AirPlay
+sessions and replaying them.

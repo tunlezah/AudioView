@@ -1,0 +1,86 @@
+[
+  {
+    "event": "client_name",
+    "detail": "Ben's iPhone"
+  },
+  {
+    "event": "user_agent",
+    "detail": "AirPlay/845.5.1"
+  },
+  {
+    "event": "client_ip",
+    "detail": "192.168.1.42"
+  },
+  {
+    "event": "server_ip",
+    "detail": "192.168.1.10"
+  },
+  {
+    "event": "active_begin"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Aphex Twin"
+  },
+  {
+    "event": "core",
+    "detail": "album=Selected Ambient Works 85-92"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Aphex Twin"
+  },
+  {
+    "event": "core",
+    "detail": "title=Xtal"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=1"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=293000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0000000000000031"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:c2cc5d517c5108a0"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "progress",
+    "detail": "0ms/293000ms"
+  },
+  {
+    "event": "progress",
+    "detail": "12000ms/293000ms"
+  },
+  {
+    "event": "stall"
+  }
+]

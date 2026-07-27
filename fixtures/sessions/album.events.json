@@ -1,0 +1,223 @@
+[
+  {
+    "event": "client_name",
+    "detail": "Ben's iPhone"
+  },
+  {
+    "event": "user_agent",
+    "detail": "AirPlay/845.5.1"
+  },
+  {
+    "event": "client_ip",
+    "detail": "192.168.1.42"
+  },
+  {
+    "event": "server_ip",
+    "detail": "192.168.1.10"
+  },
+  {
+    "event": "active_begin"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Massive Attack"
+  },
+  {
+    "event": "core",
+    "detail": "album=Mezzanine"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Massive Attack"
+  },
+  {
+    "event": "core",
+    "detail": "title=Angel"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=1"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=379000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0102030405060701"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:e5d02d17cbd49750"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "volume",
+    "detail": "-14.5dB"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "progress",
+    "detail": "0ms/379000ms"
+  },
+  {
+    "event": "progress",
+    "detail": "189000ms/379000ms"
+  },
+  {
+    "event": "play_end"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Massive Attack"
+  },
+  {
+    "event": "core",
+    "detail": "album=Mezzanine"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Massive Attack"
+  },
+  {
+    "event": "core",
+    "detail": "title=Risingson"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=2"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=298000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0102030405060702"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:76dcd6b431e66f2a"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "progress",
+    "detail": "0ms/298000ms"
+  },
+  {
+    "event": "progress",
+    "detail": "149000ms/298000ms"
+  },
+  {
+    "event": "play_end"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Massive Attack"
+  },
+  {
+    "event": "core",
+    "detail": "album=Mezzanine"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Massive Attack"
+  },
+  {
+    "event": "core",
+    "detail": "title=Teardrop"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=3"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=330000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0102030405060703"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:bf8669dca89bacbb"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "progress",
+    "detail": "0ms/330000ms"
+  },
+  {
+    "event": "progress",
+    "detail": "165000ms/330000ms"
+  },
+  {
+    "event": "play_end"
+  },
+  {
+    "event": "active_end"
+  }
+]

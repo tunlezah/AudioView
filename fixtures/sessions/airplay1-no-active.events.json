@@ -1,0 +1,79 @@
+[
+  {
+    "event": "client_name",
+    "detail": "Old iTunes"
+  },
+  {
+    "event": "user_agent",
+    "detail": "iTunes/12.9"
+  },
+  {
+    "event": "client_ip",
+    "detail": "192.168.1.42"
+  },
+  {
+    "event": "server_ip",
+    "detail": "192.168.1.10"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Portishead"
+  },
+  {
+    "event": "core",
+    "detail": "album=Dummy"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Portishead"
+  },
+  {
+    "event": "core",
+    "detail": "title=Roads"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=8"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=322000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0000000000000041"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:14f9236710767dd7"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "progress",
+    "detail": "0ms/322000ms"
+  },
+  {
+    "event": "play_end"
+  }
+]

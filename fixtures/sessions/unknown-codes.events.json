@@ -1,0 +1,89 @@
+[
+  {
+    "event": "active_begin"
+  },
+  {
+    "event": "unknown",
+    "detail": "ssnc/copl 18 bytes"
+  },
+  {
+    "event": "unknown",
+    "detail": "ssnc/acre 10 bytes"
+  },
+  {
+    "event": "unknown",
+    "detail": "ssnc/dapo 4 bytes"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Jon Hopkins"
+  },
+  {
+    "event": "core",
+    "detail": "album=Immunity"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Jon Hopkins"
+  },
+  {
+    "event": "core",
+    "detail": "title=Open Eye Signal"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=3"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=477000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0000000000000061"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "core",
+    "detail": "asdk (1 bytes)"
+  },
+  {
+    "event": "core",
+    "detail": "aeSP (1 bytes)"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture",
+    "detail": "49348 bytes sha256:f8873657be4e5e2d"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "unknown",
+    "detail": "ssnc/phbt 3 bytes"
+  },
+  {
+    "event": "play_end"
+  },
+  {
+    "event": "active_end"
+  }
+]

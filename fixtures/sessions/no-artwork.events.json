@@ -1,0 +1,84 @@
+[
+  {
+    "event": "client_name",
+    "detail": "Kitchen iPad"
+  },
+  {
+    "event": "user_agent",
+    "detail": "AirPlay/845.5.1"
+  },
+  {
+    "event": "client_ip",
+    "detail": "192.168.1.42"
+  },
+  {
+    "event": "server_ip",
+    "detail": "192.168.1.10"
+  },
+  {
+    "event": "active_begin"
+  },
+  {
+    "event": "play_begin"
+  },
+  {
+    "event": "bundle_start"
+  },
+  {
+    "event": "core",
+    "detail": "artist=Unknown Artist"
+  },
+  {
+    "event": "core",
+    "detail": "album=Field Recordings"
+  },
+  {
+    "event": "core",
+    "detail": "album_artist=Unknown Artist"
+  },
+  {
+    "event": "core",
+    "detail": "title=Untitled"
+  },
+  {
+    "event": "core",
+    "detail": "genre=Electronica"
+  },
+  {
+    "event": "core",
+    "detail": "track_number=1"
+  },
+  {
+    "event": "core",
+    "detail": "duration_ms=60000"
+  },
+  {
+    "event": "core",
+    "detail": "persistent_id=0000000000000011"
+  },
+  {
+    "event": "bundle_end"
+  },
+  {
+    "event": "picture_start"
+  },
+  {
+    "event": "picture_cleared"
+  },
+  {
+    "event": "picture_end"
+  },
+  {
+    "event": "first_frame"
+  },
+  {
+    "event": "progress",
+    "detail": "0ms/60000ms"
+  },
+  {
+    "event": "play_end"
+  },
+  {
+    "event": "active_end"
+  }
+]
