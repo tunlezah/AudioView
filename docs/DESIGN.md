@@ -116,6 +116,7 @@ AudioView/
 ├── crates/
 │   ├── lpframe-proto/          # IPC message types (serde), shared by both ends
 │   ├── lpframe-config/         # TOML config schema + loader + validation
+│   ├── lpframe-image/          # OKLab, perceptual hash, resampling (both ends)
 │   ├── spmeta/                 # shairport-sync metadata pipe parser (pure lib)
 │   ├── artd/                   # metadata + artwork + power daemon
 │   ├── lprender/               # KMS/DRM renderer (+ SDL2 dev backend)
@@ -795,7 +796,7 @@ See §7.3. `artd` binds the listener itself, so there is no extra unit. Because 
 | `spmeta` decode | Fixture replay → golden `*.events.json` |
 | `artd` state machine | Fixture replay with a fake clock; assert transition sequence and emitted NDJSON against golden files |
 | `artd` power | Fake GPIO backend recording `(timestamp, level)`; assert debounce and delays with the fake clock |
-| Enrichment | `wiremock` for iTunes/MB/CAA; cassettes recorded from the real APIs via `--record`. Gate tests use a corpus of correct-match and known-wrong-match image pairs |
+| Enrichment | A local mock catalogue for iTunes/MB/CAA — a hand-rolled `tokio` listener rather than `wiremock`, because it also has to synthesise images at arbitrary sizes, count requests and refuse connections outright. Gate tests build correct-match and known-wrong-match image pairs in-process. **No test reaches the real internet**, and no cassettes are recorded from it |
 | Cache | LRU eviction, crash-safety (kill mid-write, assert index consistency) |
 | `lprender` | Headless EGL golden images at fixed crossfade points; state-machine tests against a mock `artd`. Golden images rendered at every aspect ratio in the §6.3.1 matrix, so a layout regression on 16:9 is caught without a 16:9 panel |
 | Web interface | API contract tests; config-layering round-trips (override → merge → reset); auth (rate limit, cookie flags, constant-time compare); validation rejects bad config without corrupting `config.local.toml`; confirm-or-revert times out correctly |
@@ -837,7 +838,7 @@ Following the requested order. Each milestone ends with something demonstrable.
 | 2 | `artd` core | **Done.** State machine, IPC server, AirPlay-art-only path, read-only web pages, `lpctl`. Power state is computed and published as *intent*; the GPIO backend lands in milestone 6. |
 | 3 | `lprender` static/slideshow | **Done.** Shared GLES3 renderer, layout, scene, decode, slideshow; SDL2, headless and KMS/DRM backends; 16 golden images across the panel matrix. The DRM present path (GBM, atomic commit, page flip, `ACTIVE=0` blanking) is implemented but **unverified against hardware** — no DRM node in CI. |
 | 4 | Integration | **Done.** Renderer driven by `artd` over the socket, reconnecting with backoff; systemd units with the `Before=shairport-sync` ordering; an end-to-end test running a real daemon, a replayed session and the headless renderer. Play from a phone → art appears and crossfades. **This is the first end-to-end device**, subject to milestone 3's outstanding DRM present path. |
-| 5 | Enrichment | iTunes + MusicBrainz, both gates, cache, rate limiting. |
+| 5 | Enrichment | **Done.** iTunes + MusicBrainz/CAA, text and perceptual gates, SQLite-indexed cache with LRU eviction and negative entries, token-bucket rate limiting, single-flight, a two-task worker pool, and enrichment counters on the diagnostics page. Every test runs against a local mock catalogue. The gate thresholds are the design's numbers and have **not** been calibrated against a corpus of real cover art. |
 | 6 | Power management | GPIO amp trigger, display blanking, ambient mode, fade-to-black + CRTC off. |
 | 7 | Web interface | Config layering, settings/diagnostics UI, auth, confirm-or-revert. |
 | 8 | Provisioning | `install.sh`, `.deb`, systemd units, overlayfs, writable partition, and the full `docs/BUILD.md` from clean flash to working device. |

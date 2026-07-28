@@ -14,6 +14,7 @@ Square panels are the intent, but any resolution, aspect ratio, orientation, or 
 | `spmeta` | Parser for the shairport-sync metadata pipe |
 | `artd` | Metadata state machine, artwork enrichment, amp/display power, web interface |
 | `lprender` | Fullscreen KMS/DRM + GLES3 renderer (SDL2 and headless dev backends) |
+| `lpframe-image` | OKLab conversion, perceptual hashing and resampling, shared by `artd` and `lprender` |
 | `lpcapture` | Records real AirPlay sessions to replayable fixtures |
 
 ## Status
@@ -26,8 +27,8 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 | 2 | `artd` core | done |
 | 3 | `lprender` static/slideshow | done — DRM path unverified on hardware |
 | 4 | Integration | done |
-| 5 | Enrichment | next |
-| 6 | Power management | |
+| 5 | Enrichment | done — gate thresholds unvalidated against real cover art |
+| 6 | Power management | next |
 | 7 | Web interface | |
 | 8 | Provisioning + `docs/BUILD.md` | |
 

@@ -15,6 +15,7 @@ backend-sdl2 = ["dep:sdl2"]
 
 [dependencies]
 lpframe-config.workspace = true
+lpframe-image.workspace = true
 lpframe-proto.workspace = true
 
 anyhow.workspace = true

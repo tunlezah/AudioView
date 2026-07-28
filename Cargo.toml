@@ -5,6 +5,7 @@ members = [
     "crates/lpcapture",
     "crates/lpframe-proto",
     "crates/lpframe-config",
+    "crates/lpframe-image",
     "crates/artd",
     "crates/lpctl",
     "crates/lprender",
@@ -21,6 +22,7 @@ repository = "https://github.com/tunlezah/AudioView"
 spmeta = { path = "crates/spmeta" }
 lpframe-proto = { path = "crates/lpframe-proto" }
 lpframe-config = { path = "crates/lpframe-config" }
+lpframe-image = { path = "crates/lpframe-image" }
 
 anyhow = "1"
 base64 = "0.22"
@@ -41,6 +43,10 @@ time = { version = "0.3", features = ["formatting", "macros"] }
 glow = "0.16"
 khronos-egl = { version = "6", features = ["static"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# rustls rather than the system OpenSSL: one fewer thing to cross-compile for
+# aarch64, and the device has no certificate store worth reusing.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 drm = "0.14"
 gbm = "0.18"
 sdl2 = { version = "0.37", default-features = false }

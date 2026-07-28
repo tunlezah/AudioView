@@ -78,6 +78,9 @@
   <h2>Counters</h2>
   <div class="counters" id="counters"></div>
 
+  <h2>Enrichment</h2>
+  <div class="counters" id="enrichment"></div>
+
   <h2>Recent events</h2>
   <table><tbody id="notes"></tbody></table>
 </main>
@@ -114,7 +117,10 @@ function render(state) {
     artRevision = null;
     $("art").removeAttribute("src");
   }
-  $("p-source").textContent = a ? `${a.source} ${a.width || "?"}×${a.height || "?"}` : "no artwork";
+  $("p-source").textContent = a
+    ? `${a.source} ${a.width || "?"}×${a.height || "?"}${a.is_upgrade ? " · upgraded" : ""}`
+    : "no artwork";
+  $("p-source").className = "pill" + (a && a.is_upgrade ? " on" : "");
 
   const amp = state.power?.amp;
   $("p-amp").textContent = amp ? "amp on" : "amp off";
@@ -134,9 +140,11 @@ function render(state) {
 async function refreshDiagnostics() {
   try {
     const d = await (await fetch("/api/diagnostics")).json();
-    $("counters").innerHTML = Object.entries(d.counters)
+    const tally = o => Object.entries(o || {})
       .map(([k, v]) => `<div class="counter"><b>${v}</b><span>${k.replace(/_/g, " ")}</span></div>`)
       .join("");
+    $("counters").innerHTML = tally(d.counters);
+    $("enrichment").innerHTML = tally(d.enrichment);
     $("notes").innerHTML = d.notes
       .map(n => `<tr><td class="ts">${n.ts.slice(11, 19)}</td><td class="in">${n.input}</td><td>${n.text}</td></tr>`)
       .join("");

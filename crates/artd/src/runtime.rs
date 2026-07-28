@@ -13,9 +13,10 @@ use lpframe_config::Config;
 use lpframe_proto::ArtworkSource;
 
 use crate::artwork::ArtStore;
+use crate::enrich::{album_key, Enricher, Report, Request, Verdict};
 use crate::hub::Hub;
 use crate::ipc::Command;
-use crate::machine::{Effect, Input, Machine};
+use crate::machine::{Effect, EnrichmentOutcome, Input, Machine};
 
 /// Monotonic milliseconds. Never wall-clock: an NTP step shortly after boot
 /// must not fire a ten-minute amp timer early.
@@ -92,6 +93,9 @@ pub struct Core {
     hub: Hub,
     clock: Arc<dyn Clock>,
     amp: Box<dyn AmpBackend>,
+    /// Absent when enrichment is off, which is how "off means off" is
+    /// enforced: there is no object here that could reach the network.
+    enricher: Option<Enricher>,
 }
 
 impl Core {
@@ -109,11 +113,24 @@ impl Core {
             hub,
             clock,
             amp,
+            enricher: None,
         })
+    }
+
+    /// Attach the enrichment pipeline.
+    ///
+    /// Separate from [`Core::new`] because it needs a tokio runtime to spawn
+    /// into, and the state-machine replay tests deliberately run without one.
+    pub fn set_enricher(&mut self, enricher: Option<Enricher>) {
+        self.enricher = enricher;
     }
 
     pub fn machine(&self) -> &Machine {
         &self.machine
+    }
+
+    pub fn enricher(&self) -> Option<&Enricher> {
+        self.enricher.as_ref()
     }
 
     /// Feed one input and perform whatever it implies.
@@ -127,12 +144,15 @@ impl Core {
             match effect {
                 Effect::StoreArtwork(bytes) => match self.store.store(bytes) {
                     Ok(stored) => {
+                        // Unconditional and immediate. Enrichment is decoration
+                        // and may never delay this (DESIGN principle 1).
                         artwork_changed |= self.machine.set_artwork(
                             stored.sha256,
                             stored.path,
                             stored.bytes,
                             stored.dimensions,
                             ArtworkSource::Airplay,
+                            false,
                         );
                     }
                     // Losing artwork must never take the daemon down; the
@@ -162,6 +182,103 @@ impl Core {
 
         if outcome.changed || artwork_changed {
             self.hub.set_counters(self.machine.counters());
+            self.hub.publish(self.machine.state().clone());
+        }
+
+        self.consider_enrichment();
+    }
+
+    /// Offer the current track to the enrichment pipeline.
+    ///
+    /// Called after every input rather than only on a track change: the
+    /// artwork arrives separately from the metadata bundle, so which of the
+    /// two lands last varies by sender. `Enricher::consider` is the thing
+    /// that decides whether there is anything new to do.
+    fn consider_enrichment(&self) {
+        let Some(enricher) = &self.enricher else {
+            return;
+        };
+        let state = self.machine.state();
+        let (Some(track), Some(art)) = (&state.track, &state.artwork) else {
+            return;
+        };
+        // Only AirPlay art is a candidate for upgrading. Re-offering an
+        // already-enriched image would compare it against itself.
+        if art.source != ArtworkSource::Airplay {
+            return;
+        }
+        let (Some(artist), Some(album)) = (track.artist.as_ref(), track.album.as_ref()) else {
+            return;
+        };
+
+        enricher.consider(Request {
+            artist: artist.clone(),
+            album: album.clone(),
+            current_path: art.path.clone(),
+            current_revision: art.revision,
+            current_dimensions: art.width.zip(art.height),
+        });
+    }
+
+    /// Apply one enrichment result.
+    ///
+    /// The staleness check is the important part. A report can arrive after
+    /// the track has moved on, and swapping then would put the previous
+    /// album's cover over the current one — a failure a viewer notices
+    /// immediately and cannot explain.
+    pub fn handle_enrichment(&mut self, report: Report) {
+        let current = self.machine.state().track.as_ref().and_then(|t| {
+            let (artist, album) = (t.artist.as_deref()?, t.album.as_deref()?);
+            Some(album_key(artist, album))
+        });
+        if current.as_deref() != Some(report.key.as_str()) {
+            tracing::debug!("discarding a stale enrichment result for {}", report.label);
+            return;
+        }
+
+        let outcome = match &report.verdict {
+            Verdict::Cached(_) => EnrichmentOutcome::CacheHit,
+            Verdict::Upgraded(_) => EnrichmentOutcome::Upgraded,
+            Verdict::NegativeCacheHit => EnrichmentOutcome::NegativeCacheHit,
+            Verdict::TextRejected { .. } => EnrichmentOutcome::TextRejected,
+            Verdict::SizeRejected { .. } => EnrichmentOutcome::SizeRejected,
+            Verdict::PerceptualRejected { .. } => EnrichmentOutcome::PerceptualRejected,
+            Verdict::Unreachable(_) => EnrichmentOutcome::NetworkError,
+            Verdict::NoMatch | Verdict::Undecodable(_) => EnrichmentOutcome::NoMatch,
+        };
+        self.machine.record_enrichment(outcome, report.rate_limited);
+
+        let detail = report.verdict.describe();
+        match &report.verdict {
+            // Offline is the normal state of a device on flaky Wi-Fi, not an
+            // error, and it must be silent above debug level (DESIGN §5.4).
+            Verdict::Unreachable(_) => tracing::debug!("enrichment: {}: {detail}", report.label),
+            _ => tracing::info!("enrichment: {}: {detail}", report.label),
+        }
+        // Notes are what the diagnostics page shows, and every rejection
+        // carries its scores so a wrong decision can be argued with (§7.3).
+        self.hub
+            .push_note("enrichment", format!("{}: {detail}", report.label));
+
+        let mut changed = false;
+        if let Some(upgrade) = report.verdict.upgrade() {
+            match self.store.store(&upgrade.bytes) {
+                Ok(stored) => {
+                    changed = self.machine.set_artwork(
+                        stored.sha256,
+                        stored.path,
+                        stored.bytes,
+                        stored.dimensions.or(Some(upgrade.dimensions)),
+                        upgrade.source,
+                        true,
+                    );
+                }
+                Err(e) => tracing::warn!("could not stage enriched artwork: {e}"),
+            }
+        }
+
+        self.hub.set_counters(self.machine.counters());
+        if changed {
             self.hub.publish(self.machine.state().clone());
         }
     }

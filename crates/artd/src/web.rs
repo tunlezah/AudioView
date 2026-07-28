@@ -81,6 +81,19 @@ async fn api_diagnostics(AxumState(hub): AxumState<Hub>) -> Response {
             "stall_timeouts": c.stall_timeouts,
             "session_timeouts": c.session_timeouts,
         },
+        // Every enrichment decision reaches the page twice: as a tally here,
+        // and as a note carrying the scores behind it (DESIGN §7.3).
+        "enrichment": {
+            "attempted": c.enrichment.attempted,
+            "cache_hits": c.enrichment.cache_hits,
+            "negative_cache_hits": c.enrichment.negative_cache_hits,
+            "text_rejections": c.enrichment.text_rejections,
+            "size_rejections": c.enrichment.size_rejections,
+            "perceptual_rejections": c.enrichment.perceptual_rejections,
+            "upgrades": c.enrichment.upgrades,
+            "network_errors": c.enrichment.network_errors,
+            "rate_limited": c.enrichment.rate_limited,
+        },
         "notes": hub.notes(),
         "version": env!("CARGO_PKG_VERSION"),
     }))

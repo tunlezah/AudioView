@@ -394,6 +394,7 @@ fn identical_artwork_does_not_bump_the_revision() {
             100,
             Some((500, 500)),
             lpframe_proto::ArtworkSource::Airplay,
+            false,
         )
     };
     assert!(set(&mut m, "aaaa"));
@@ -403,6 +404,76 @@ fn identical_artwork_does_not_bump_the_revision() {
     assert!(set(&mut m, "bbbb"));
     assert_eq!(m.state().artwork.as_ref().unwrap().revision, 2);
     assert_eq!(m.counters().artwork_duplicates, 1);
+}
+
+#[test]
+fn an_enrichment_swap_is_marked_as_an_upgrade_and_airplay_art_is_not() {
+    // The renderer picks its crossfade length off this flag alone: 250ms for
+    // the same picture getting sharper, 600ms for a new record (§5.3).
+    let mut m = machine();
+    m.set_artwork(
+        "aaaa".into(),
+        "/tmp/a.jpg".into(),
+        100,
+        Some((500, 500)),
+        lpframe_proto::ArtworkSource::Airplay,
+        false,
+    );
+    assert!(!m.state().artwork.as_ref().unwrap().is_upgrade);
+
+    m.set_artwork(
+        "bbbb".into(),
+        "/tmp/b.jpg".into(),
+        900,
+        Some((3000, 3000)),
+        lpframe_proto::ArtworkSource::Itunes,
+        true,
+    );
+    let art = m.state().artwork.as_ref().unwrap();
+    assert!(art.is_upgrade);
+    assert_eq!(art.revision, 2);
+    assert_eq!(art.source, lpframe_proto::ArtworkSource::Itunes);
+
+    // The next track's AirPlay art clears the flag again.
+    m.set_artwork(
+        "cccc".into(),
+        "/tmp/c.jpg".into(),
+        100,
+        Some((500, 500)),
+        lpframe_proto::ArtworkSource::Airplay,
+        false,
+    );
+    assert!(!m.state().artwork.as_ref().unwrap().is_upgrade);
+}
+
+#[test]
+fn every_enrichment_outcome_lands_in_its_own_counter() {
+    use artd::machine::EnrichmentOutcome as O;
+    let mut m = machine();
+    for outcome in [
+        O::CacheHit,
+        O::NegativeCacheHit,
+        O::TextRejected,
+        O::SizeRejected,
+        O::PerceptualRejected,
+        O::Upgraded,
+        O::NetworkError,
+        O::NoMatch,
+    ] {
+        m.record_enrichment(outcome, false);
+    }
+    m.record_enrichment(O::Upgraded, true);
+
+    let c = m.counters().enrichment;
+    assert_eq!(c.attempted, 9);
+    assert_eq!(c.cache_hits, 1);
+    assert_eq!(c.negative_cache_hits, 1);
+    assert_eq!(c.text_rejections, 1);
+    assert_eq!(c.size_rejections, 1);
+    assert_eq!(c.perceptual_rejections, 1);
+    assert_eq!(c.upgrades, 2);
+    assert_eq!(c.network_errors, 1);
+    assert_eq!(c.rate_limited, 1);
 }
 
 #[test]
