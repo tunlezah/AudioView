@@ -1,0 +1,145 @@
+[
+  {
+    "at_ms": 100,
+    "input": "client_name",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 200,
+    "input": "user_agent",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 300,
+    "input": "client_ip",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 500,
+    "input": "active_begin",
+    "playback": "active",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "idle -> active",
+      "amp on",
+      "display on"
+    ]
+  },
+  {
+    "at_ms": 600,
+    "input": "play_begin",
+    "playback": "starting",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> starting"
+    ]
+  },
+  {
+    "at_ms": 1600,
+    "input": "bundle_end",
+    "playback": "starting",
+    "track": "Aphex Twin — Xtal",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "track: Aphex Twin — Xtal"
+    ]
+  },
+  {
+    "at_ms": 1800,
+    "input": "picture",
+    "playback": "starting",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2000,
+    "input": "first_frame",
+    "playback": "playing",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "starting -> playing"
+    ]
+  },
+  {
+    "at_ms": 2100,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2200,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2300,
+    "input": "stall",
+    "playback": "paused",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "playing -> paused",
+      "metadata stalled"
+    ]
+  },
+  {
+    "at_ms": 62300,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "session timed out",
+      "paused -> idle"
+    ]
+  },
+  {
+    "at_ms": 362300,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": true,
+    "display": "off",
+    "notes": [
+      "display off"
+    ]
+  },
+  {
+    "at_ms": 662300,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Aphex Twin — Xtal",
+    "artwork": "r1 49348b c2cc5d517c51",
+    "amp": false,
+    "display": "off",
+    "notes": [
+      "amp off"
+    ]
+  }
+]

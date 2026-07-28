@@ -1,0 +1,155 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LP Frame</title>
+<style>
+  :root {
+    --bg: #0d0e10; --fg: #e8e8ea; --dim: #8a8d94; --line: #24262b;
+    --accent: #7aa2f7; --ok: #7dcfa0; --warn: #e0af68;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header {
+    display: flex; align-items: baseline; gap: 1rem;
+    padding: 1rem 1.25rem; border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: 1rem; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  #conn { margin-left: auto; font-size: .8rem; color: var(--dim); }
+  #conn.live::before { content: "● "; color: var(--ok); }
+  #conn.dead::before { content: "● "; color: var(--warn); }
+  main { max-width: 60rem; margin: 0 auto; padding: 1.25rem; }
+  .now { display: grid; grid-template-columns: minmax(0, 240px) 1fr; gap: 1.5rem; align-items: start; }
+  @media (max-width: 640px) { .now { grid-template-columns: 1fr; } }
+  #art {
+    width: 100%; aspect-ratio: 1; border-radius: 6px; background: #17181c;
+    object-fit: cover; display: block; border: 1px solid var(--line);
+  }
+  #title { font-size: 1.5rem; font-weight: 600; margin: 0 0 .25rem; }
+  #artist { color: var(--dim); margin: 0 0 .1rem; }
+  #album { color: var(--dim); margin: 0 0 1rem; }
+  .pills { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
+  .pill {
+    font-size: .75rem; padding: .15rem .5rem; border-radius: 99px;
+    border: 1px solid var(--line); color: var(--dim);
+  }
+  .pill.on { color: var(--accent); border-color: var(--accent); }
+  progress { width: 100%; height: 4px; accent-color: var(--accent); }
+  .times { display: flex; justify-content: space-between; font-size: .8rem; color: var(--dim); }
+  h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--dim); margin: 2rem 0 .75rem; font-weight: 600; }
+  .counters { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .5rem; }
+  .counter { border: 1px solid var(--line); border-radius: 6px; padding: .5rem .7rem; }
+  .counter b { display: block; font-size: 1.25rem; font-weight: 600; }
+  .counter span { font-size: .72rem; color: var(--dim); }
+  table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  td { padding: .3rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.ts { color: var(--dim); white-space: nowrap; width: 1%; font-variant-numeric: tabular-nums; }
+  td.in { color: var(--accent); white-space: nowrap; width: 1%; }
+  footer { color: var(--dim); font-size: .78rem; padding: 1rem 1.25rem; border-top: 1px solid var(--line); }
+</style>
+
+<header>
+  <h1>LP Frame</h1>
+  <span id="playback" class="pill">—</span>
+  <span id="conn" class="dead">connecting</span>
+</header>
+
+<main>
+  <section class="now">
+    <img id="art" alt="">
+    <div>
+      <p id="title">Nothing playing</p>
+      <p id="artist"></p>
+      <p id="album"></p>
+      <div class="pills">
+        <span class="pill" id="p-source">—</span>
+        <span class="pill" id="p-amp">amp off</span>
+        <span class="pill" id="p-display">display off</span>
+        <span class="pill" id="p-client"></span>
+      </div>
+      <progress id="prog" value="0" max="1"></progress>
+      <div class="times"><span id="pos">0:00</span><span id="dur">0:00</span></div>
+    </div>
+  </section>
+
+  <h2>Counters</h2>
+  <div class="counters" id="counters"></div>
+
+  <h2>Recent events</h2>
+  <table><tbody id="notes"></tbody></table>
+</main>
+
+<footer>
+  Read-only. Settings and authentication arrive with milestone 7 — this page
+  is bound to loopback until then.
+</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = ms => {
+  if (!ms && ms !== 0) return "0:00";
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+let artRevision = null;
+
+function render(state) {
+  $("playback").textContent = state.playback;
+  $("playback").className = "pill" + (state.playback === "playing" ? " on" : "");
+
+  const t = state.track || {};
+  $("title").textContent = t.title || (state.playback === "idle" ? "Nothing playing" : "Unknown track");
+  $("artist").textContent = t.artist || "";
+  $("album").textContent = t.album || "";
+
+  const a = state.artwork;
+  if (a && a.revision !== artRevision) {
+    artRevision = a.revision;
+    // Keyed on revision so the browser never shows the previous track's art.
+    $("art").src = `/api/artwork/current?rev=${a.revision}`;
+  } else if (!a) {
+    artRevision = null;
+    $("art").removeAttribute("src");
+  }
+  $("p-source").textContent = a ? `${a.source} ${a.width || "?"}×${a.height || "?"}` : "no artwork";
+
+  const amp = state.power?.amp;
+  $("p-amp").textContent = amp ? "amp on" : "amp off";
+  $("p-amp").className = "pill" + (amp ? " on" : "");
+  const disp = state.power?.display || "off";
+  $("p-display").textContent = `display ${disp}`;
+  $("p-display").className = "pill" + (disp !== "off" ? " on" : "");
+  $("p-client").textContent = state.session?.client_name || "";
+
+  const p = state.progress;
+  $("prog").max = p?.duration_ms || 1;
+  $("prog").value = p?.position_ms || 0;
+  $("pos").textContent = fmt(p?.position_ms);
+  $("dur").textContent = fmt(p?.duration_ms);
+}
+
+async function refreshDiagnostics() {
+  try {
+    const d = await (await fetch("/api/diagnostics")).json();
+    $("counters").innerHTML = Object.entries(d.counters)
+      .map(([k, v]) => `<div class="counter"><b>${v}</b><span>${k.replace(/_/g, " ")}</span></div>`)
+      .join("");
+    $("notes").innerHTML = d.notes
+      .map(n => `<tr><td class="ts">${n.ts.slice(11, 19)}</td><td class="in">${n.input}</td><td>${n.text}</td></tr>`)
+      .join("");
+  } catch (_) { /* the stream reports connection state; don't double-report */ }
+}
+
+const es = new EventSource("/api/events");
+es.onopen = () => { $("conn").textContent = "live"; $("conn").className = "live"; };
+es.onerror = () => { $("conn").textContent = "reconnecting"; $("conn").className = "dead"; };
+es.onmessage = e => {
+  const msg = JSON.parse(e.data);
+  if (msg.type === "state") { render(msg.state); refreshDiagnostics(); }
+};
+refreshDiagnostics();
+setInterval(refreshDiagnostics, 5000);
+</script>

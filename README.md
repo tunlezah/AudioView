@@ -23,8 +23,8 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 | # | Milestone | |
 |---|---|---|
 | 1 | `spmeta` parser + `lpcapture` | done |
-| 2 | `artd` core | next |
-| 3 | `lprender` static/slideshow | |
+| 2 | `artd` core | done |
+| 3 | `lprender` static/slideshow | next |
 | 4 | Integration | |
 | 5 | Enrichment | |
 | 6 | Power management | |
@@ -42,3 +42,28 @@ make fixtures   # regenerate synthetic fixtures and golden logs
 
 See [fixtures/README.md](fixtures/README.md) for recording real AirPlay
 sessions and replaying them.
+
+### Running artd without a Pi
+
+```bash
+cargo build --workspace
+mkdir -p /tmp/lp/art
+cat > /tmp/lp/config.toml <<EOF
+[device]
+metadata_pipe = "/tmp/lp/metadata"
+[ipc]
+socket = "/tmp/lp/artd.sock"
+art_dir = "/tmp/lp/art"
+[web]
+bind = "127.0.0.1:8730"
+EOF
+
+./target/debug/artd --config /tmp/lp/config.toml --config-local /tmp/lp/local.toml &
+./target/debug/lpctl --socket /tmp/lp/artd.sock watch &
+
+# Feed it a recorded session
+./target/debug/lpcapture replay fixtures/sessions/album.pipe --to /tmp/lp/metadata
+```
+
+Then open <http://127.0.0.1:8730/> for Now Playing and diagnostics. On a real
+device, point `metadata_pipe` at shairport-sync's pipe instead of replaying.

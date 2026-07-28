@@ -1,0 +1,302 @@
+[
+  {
+    "at_ms": 100,
+    "input": "client_name",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 200,
+    "input": "user_agent",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 300,
+    "input": "client_ip",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 500,
+    "input": "active_begin",
+    "playback": "active",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "idle -> active",
+      "amp on",
+      "display on"
+    ]
+  },
+  {
+    "at_ms": 600,
+    "input": "play_begin",
+    "playback": "starting",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> starting"
+    ]
+  },
+  {
+    "at_ms": 1600,
+    "input": "bundle_end",
+    "playback": "starting",
+    "track": "Massive Attack — Angel",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "track: Massive Attack — Angel"
+    ]
+  },
+  {
+    "at_ms": 1800,
+    "input": "picture",
+    "playback": "starting",
+    "track": "Massive Attack — Angel",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2000,
+    "input": "volume",
+    "playback": "starting",
+    "track": "Massive Attack — Angel",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2100,
+    "input": "first_frame",
+    "playback": "playing",
+    "track": "Massive Attack — Angel",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "starting -> playing"
+    ]
+  },
+  {
+    "at_ms": 2200,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Massive Attack — Angel",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2300,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Massive Attack — Angel",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2400,
+    "input": "play_end",
+    "playback": "active",
+    "track": "Massive Attack — Angel",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "playing -> active"
+    ]
+  },
+  {
+    "at_ms": 2500,
+    "input": "play_begin",
+    "playback": "starting",
+    "track": "Massive Attack — Angel",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> starting"
+    ]
+  },
+  {
+    "at_ms": 3500,
+    "input": "bundle_end",
+    "playback": "starting",
+    "track": "Massive Attack — Risingson",
+    "artwork": "r1 49348b e5d02d17cbd4",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "track: Massive Attack — Risingson"
+    ]
+  },
+  {
+    "at_ms": 3700,
+    "input": "picture",
+    "playback": "starting",
+    "track": "Massive Attack — Risingson",
+    "artwork": "r2 49348b 76dcd6b431e6",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 3900,
+    "input": "first_frame",
+    "playback": "playing",
+    "track": "Massive Attack — Risingson",
+    "artwork": "r2 49348b 76dcd6b431e6",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "starting -> playing"
+    ]
+  },
+  {
+    "at_ms": 4000,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Massive Attack — Risingson",
+    "artwork": "r2 49348b 76dcd6b431e6",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 4100,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Massive Attack — Risingson",
+    "artwork": "r2 49348b 76dcd6b431e6",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 4200,
+    "input": "play_end",
+    "playback": "active",
+    "track": "Massive Attack — Risingson",
+    "artwork": "r2 49348b 76dcd6b431e6",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "playing -> active"
+    ]
+  },
+  {
+    "at_ms": 4300,
+    "input": "play_begin",
+    "playback": "starting",
+    "track": "Massive Attack — Risingson",
+    "artwork": "r2 49348b 76dcd6b431e6",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> starting"
+    ]
+  },
+  {
+    "at_ms": 5300,
+    "input": "bundle_end",
+    "playback": "starting",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r2 49348b 76dcd6b431e6",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "track: Massive Attack — Teardrop"
+    ]
+  },
+  {
+    "at_ms": 5500,
+    "input": "picture",
+    "playback": "starting",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 5700,
+    "input": "first_frame",
+    "playback": "playing",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "starting -> playing"
+    ]
+  },
+  {
+    "at_ms": 5800,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 5900,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 6000,
+    "input": "play_end",
+    "playback": "active",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "playing -> active"
+    ]
+  },
+  {
+    "at_ms": 6100,
+    "input": "active_end",
+    "playback": "idle",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> idle"
+    ]
+  },
+  {
+    "at_ms": 306100,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": true,
+    "display": "off",
+    "notes": [
+      "display off"
+    ]
+  },
+  {
+    "at_ms": 606100,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Massive Attack — Teardrop",
+    "artwork": "r3 49348b bf8669dca89b",
+    "amp": false,
+    "display": "off",
+    "notes": [
+      "amp off"
+    ]
+  }
+]

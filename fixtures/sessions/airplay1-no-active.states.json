@@ -1,0 +1,126 @@
+[
+  {
+    "at_ms": 100,
+    "input": "client_name",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 200,
+    "input": "user_agent",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 300,
+    "input": "client_ip",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 500,
+    "input": "play_begin",
+    "playback": "starting",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "idle -> active",
+      "active -> starting",
+      "amp on",
+      "display on"
+    ]
+  },
+  {
+    "at_ms": 1500,
+    "input": "bundle_end",
+    "playback": "starting",
+    "track": "Portishead — Roads",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "track: Portishead — Roads"
+    ]
+  },
+  {
+    "at_ms": 1700,
+    "input": "picture",
+    "playback": "starting",
+    "track": "Portishead — Roads",
+    "artwork": "r1 49348b 14f923671076",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 1900,
+    "input": "first_frame",
+    "playback": "playing",
+    "track": "Portishead — Roads",
+    "artwork": "r1 49348b 14f923671076",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "starting -> playing"
+    ]
+  },
+  {
+    "at_ms": 2000,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Portishead — Roads",
+    "artwork": "r1 49348b 14f923671076",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2100,
+    "input": "play_end",
+    "playback": "active",
+    "track": "Portishead — Roads",
+    "artwork": "r1 49348b 14f923671076",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "playing -> active"
+    ]
+  },
+  {
+    "at_ms": 62100,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Portishead — Roads",
+    "artwork": "r1 49348b 14f923671076",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "session timed out",
+      "active -> idle"
+    ]
+  },
+  {
+    "at_ms": 362100,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Portishead — Roads",
+    "artwork": "r1 49348b 14f923671076",
+    "amp": true,
+    "display": "off",
+    "notes": [
+      "display off"
+    ]
+  },
+  {
+    "at_ms": 662100,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Portishead — Roads",
+    "artwork": "r1 49348b 14f923671076",
+    "amp": false,
+    "display": "off",
+    "notes": [
+      "amp off"
+    ]
+  }
+]

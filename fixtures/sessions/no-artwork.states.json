@@ -1,0 +1,119 @@
+[
+  {
+    "at_ms": 100,
+    "input": "client_name",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 200,
+    "input": "user_agent",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 300,
+    "input": "client_ip",
+    "playback": "idle",
+    "amp": false,
+    "display": "off"
+  },
+  {
+    "at_ms": 500,
+    "input": "active_begin",
+    "playback": "active",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "idle -> active",
+      "amp on",
+      "display on"
+    ]
+  },
+  {
+    "at_ms": 600,
+    "input": "play_begin",
+    "playback": "starting",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> starting"
+    ]
+  },
+  {
+    "at_ms": 1600,
+    "input": "bundle_end",
+    "playback": "starting",
+    "track": "Unknown Artist — Untitled",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "track: Unknown Artist — Untitled"
+    ]
+  },
+  {
+    "at_ms": 2000,
+    "input": "first_frame",
+    "playback": "playing",
+    "track": "Unknown Artist — Untitled",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "starting -> playing"
+    ]
+  },
+  {
+    "at_ms": 2100,
+    "input": "progress",
+    "playback": "playing",
+    "track": "Unknown Artist — Untitled",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2200,
+    "input": "play_end",
+    "playback": "active",
+    "track": "Unknown Artist — Untitled",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "playing -> active"
+    ]
+  },
+  {
+    "at_ms": 2300,
+    "input": "active_end",
+    "playback": "idle",
+    "track": "Unknown Artist — Untitled",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> idle"
+    ]
+  },
+  {
+    "at_ms": 302300,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Unknown Artist — Untitled",
+    "amp": true,
+    "display": "off",
+    "notes": [
+      "display off"
+    ]
+  },
+  {
+    "at_ms": 602300,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Unknown Artist — Untitled",
+    "amp": false,
+    "display": "off",
+    "notes": [
+      "amp off"
+    ]
+  }
+]

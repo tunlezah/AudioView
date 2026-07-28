@@ -1,0 +1,104 @@
+[
+  {
+    "at_ms": 100,
+    "input": "active_begin",
+    "playback": "active",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "idle -> active",
+      "amp on",
+      "display on"
+    ]
+  },
+  {
+    "at_ms": 500,
+    "input": "play_begin",
+    "playback": "starting",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> starting"
+    ]
+  },
+  {
+    "at_ms": 1500,
+    "input": "bundle_end",
+    "playback": "starting",
+    "track": "Jon Hopkins — Open Eye Signal",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "track: Jon Hopkins — Open Eye Signal"
+    ]
+  },
+  {
+    "at_ms": 1900,
+    "input": "picture",
+    "playback": "starting",
+    "track": "Jon Hopkins — Open Eye Signal",
+    "artwork": "r1 49348b f8873657be4e",
+    "amp": true,
+    "display": "on"
+  },
+  {
+    "at_ms": 2100,
+    "input": "first_frame",
+    "playback": "playing",
+    "track": "Jon Hopkins — Open Eye Signal",
+    "artwork": "r1 49348b f8873657be4e",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "starting -> playing"
+    ]
+  },
+  {
+    "at_ms": 2300,
+    "input": "play_end",
+    "playback": "active",
+    "track": "Jon Hopkins — Open Eye Signal",
+    "artwork": "r1 49348b f8873657be4e",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "playing -> active"
+    ]
+  },
+  {
+    "at_ms": 2400,
+    "input": "active_end",
+    "playback": "idle",
+    "track": "Jon Hopkins — Open Eye Signal",
+    "artwork": "r1 49348b f8873657be4e",
+    "amp": true,
+    "display": "on",
+    "notes": [
+      "active -> idle"
+    ]
+  },
+  {
+    "at_ms": 302400,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Jon Hopkins — Open Eye Signal",
+    "artwork": "r1 49348b f8873657be4e",
+    "amp": true,
+    "display": "off",
+    "notes": [
+      "display off"
+    ]
+  },
+  {
+    "at_ms": 602400,
+    "input": "tick",
+    "playback": "idle",
+    "track": "Jon Hopkins — Open Eye Signal",
+    "artwork": "r1 49348b f8873657be4e",
+    "amp": false,
+    "display": "off",
+    "notes": [
+      "amp off"
+    ]
+  }
+]

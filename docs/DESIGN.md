@@ -636,10 +636,12 @@ placeholder = "/usr/share/lpframe/placeholder.png"
 [enrichment]
 enabled = true
 strictness = "text_and_visual" # off | text_only | text_and_visual | strict
-sources = ["itunes", "musicbrainz"]
+# MusicBrainz requires a contactable User-Agent, so it cannot be on by
+# default; adding it without `contact` is rejected at load.
+sources = ["itunes"]
 itunes_country = "GB"
 max_dimension = 3000
-contact = "you@example.com"    # required by MusicBrainz; unused if only itunes
+contact = ""                   # required by MusicBrainz; unused if only itunes
 rate_limit_per_min = 15
 
 [cache]
@@ -671,7 +673,9 @@ socket = "/run/lpframe/artd.sock"
 
 [web]
 enabled = true
-bind = "0.0.0.0:8730"          # "127.0.0.1:8730" to require an SSH tunnel
+# Until authentication lands (milestone 7) artd refuses any non-loopback
+# bind, so this default is 127.0.0.1 today and becomes 0.0.0.0 with auth.
+bind = "127.0.0.1:8730"
 auth = true                    # password generated at install
 mdns = true                    # advertise http://lpframe.local:8730
 
@@ -715,6 +719,7 @@ The UI offers a one-click restart for the latter two.
 
 **Auth and threat model.** Default is LAN-bound with a password, because the alternative — an unauthenticated page on the LAN — exposes listening history and lets any device on the network toggle outbound API calls.
 
+- **Until milestone 7, `artd` refuses to bind anywhere but loopback.** Shipping an unauthenticated page on the LAN with `web.auth = true` sitting unimplemented in the config would be worse than shipping no page at all — it would look protected. The default bind is `127.0.0.1:8730` and flips to `0.0.0.0:8730` when auth lands.
 - The installer generates a random passphrase, writes it to `/var/lib/lpframe/web-password.txt` (0600), prints it at the end of the install, and `lpctl web-password` reprints it. Stored as an Argon2id hash in `config.local.toml`.
 - Session cookie, `HttpOnly` + `SameSite=Strict` (which also handles CSRF), 30-day expiry. Login is rate-limited to 5 attempts/minute with constant-time comparison.
 - **Plain HTTP, stated plainly:** this protects against other people and devices casually reaching the page on your network. It does *not* protect against someone who can passively sniff your LAN — the password crosses in the clear. If that is in your threat model, set `web.bind = "127.0.0.1:8730"` and use an SSH tunnel, or front it with a TLS-terminating reverse proxy. We do not ship self-signed TLS; it trains people to click through certificate warnings and buys nothing here.
@@ -829,7 +834,7 @@ Following the requested order. Each milestone ends with something demonstrable.
 | # | Milestone | Deliverable |
 |---|---|---|
 | 1 | `spmeta` parser | **Done.** Library + fixture tests, `lpcapture`, synthetic fixture set, CI. |
-| 2 | `artd` core | State machine, IPC server, AirPlay-art-only path. `lpctl watch` prints live state from a phone. |
+| 2 | `artd` core | **Done.** State machine, IPC server, AirPlay-art-only path, read-only web pages, `lpctl`. Power state is computed and published as *intent*; the GPIO backend lands in milestone 6. |
 | 3 | `lprender` static/slideshow | DRM + SDL2 backends, crossfade, square letterboxing. `--slideshow` on a directory, no `artd`. |
 | 4 | Integration | Renderer driven by `artd`. Play from a phone → art appears and crossfades. **This is the first end-to-end device.** |
 | 5 | Enrichment | iTunes + MusicBrainz, both gates, cache, rate limiting. |

@@ -1,0 +1,86 @@
+# LP Frame — device configuration
+#
+# This file is owned by the package and is read-only on a device with an
+# overlayfs root. Changes made from the web interface are written to
+# /var/lib/lpframe/config.local.toml and take precedence per key.
+#
+# Durations are written with a unit: "600ms", "15s", "10m", "2h".
+# Settings that can be disabled also accept "off".
+
+[device]
+name = "LP Frame"                        # advertised AirPlay name
+metadata_pipe = "/tmp/shairport-sync-metadata"
+
+[audio]
+alsa_device = "default"                  # e.g. "hw:CARD=KA11,DEV=0"
+mixer = ""                               # "" disables hardware volume
+
+[display]
+connector = "auto"                       # or "HDMI-A-1", "DSI-1"
+mode = "auto"                            # auto | highest | "1920x1920@60"
+rotation = 0                             # 0 | 90 | 180 | 270
+card = "auto"
+margin_percent = 0.0                     # inset, for TVs that overscan
+
+[render]
+square = true                            # false fills the panel instead
+fit = "cover"                            # cover | contain
+background = "blur"                      # black | blur | dominant | gradient
+background_dim = 0.35                    # only visible on non-1:1 panels
+crossfade = "600ms"
+enrichment_crossfade = "250ms"           # shorter: same art, just sharper
+ken_burns = false                        # forces continuous rendering
+ken_burns_period = "180s"
+ambient = false                          # blurred screensaver while idle
+ambient_dim = 0.12
+placeholder = "/usr/share/lpframe/placeholder.png"
+
+[enrichment]
+# Enrichment sends the artist and album name to the configured services.
+# Turning it off leaves the device fully functional, just softer-looking.
+enabled = true
+strictness = "text_and_visual"           # off | text_only | text_and_visual | strict
+sources = ["itunes"]                     # add "musicbrainz" only with a contact set
+itunes_country = "GB"
+max_dimension = 3000
+contact = ""                             # REQUIRED by MusicBrainz; an email address
+rate_limit_per_min = 15                  # iTunes fair use is around 20
+
+[cache]
+dir = "/var/lib/lpframe/cache"
+max_bytes = "2GiB"
+negative_ttl = "168h"
+
+[power.amp]
+enabled = true
+gpio_chip = "auto"                       # or a label: pinctrl-rp1, pinctrl-bcm2835
+gpio_line = 17
+active_low = false
+pulse = "0ms"                            # >0 emits a momentary pulse instead
+on_event = "session_begin"               # abeg: one transition per listening session
+off_delay = "10m"
+debounce = "2s"
+
+[power.display]
+blank_after = "5m"
+ambient_after = "off"                    # or e.g. "30s"
+fade_out = "1000ms"
+
+[timeouts]
+stall = "15s"                            # playing, no pipe activity -> paused
+session = "60s"                          # any session state, no activity -> idle
+
+[ipc]
+socket = "/run/lpframe/artd.sock"
+art_dir = "/run/lpframe/art"
+art_retain = 4
+
+[web]
+enabled = true
+bind = "127.0.0.1:8730"                  # LAN binding unlocks with auth (milestone 7)
+auth = true                              # password generated at install
+mdns = true                              # advertise http://lpframe.local:8730
+
+[logging]
+level = "info"
+event_buffer = 200
