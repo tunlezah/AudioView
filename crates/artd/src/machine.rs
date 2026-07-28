@@ -75,6 +75,42 @@ pub struct Counters {
     pub pipe_eofs: u64,
     pub stall_timeouts: u64,
     pub session_timeouts: u64,
+    pub enrichment: EnrichmentCounters,
+}
+
+/// Enrichment outcomes (DESIGN §5.4, surfaced by §7.3).
+///
+/// Separate from the rest so the diagnostics page can show "of 40 attempts,
+/// 31 were cache hits and 3 were rejected by the text gate" without having to
+/// know which of the flat counters belong together.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct EnrichmentCounters {
+    pub attempted: u64,
+    pub cache_hits: u64,
+    pub negative_cache_hits: u64,
+    pub text_rejections: u64,
+    pub size_rejections: u64,
+    pub perceptual_rejections: u64,
+    pub upgrades: u64,
+    pub network_errors: u64,
+    pub rate_limited: u64,
+}
+
+/// How one enrichment attempt ended, from the counters' point of view.
+///
+/// The machine records the tally; the reasoning and the scores live in
+/// `enrich` and reach the page as notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrichmentOutcome {
+    CacheHit,
+    NegativeCacheHit,
+    TextRejected,
+    SizeRejected,
+    PerceptualRejected,
+    Upgraded,
+    NetworkError,
+    /// Nothing matched, and no gate had an opinion worth counting.
+    NoMatch,
 }
 
 pub struct Machine {
@@ -135,6 +171,10 @@ impl Machine {
     /// Record artwork the runtime has stored. Returns true if this is a new
     /// image; identical bytes resent by the sender do not bump the revision,
     /// because the revision is the renderer's crossfade trigger.
+    ///
+    /// `is_upgrade` marks the same album getting sharper rather than a new
+    /// record arriving, and the renderer crossfades over 250 ms instead of
+    /// 600 ms on the strength of it (DESIGN §5.3).
     pub fn set_artwork(
         &mut self,
         sha256: String,
@@ -142,6 +182,7 @@ impl Machine {
         bytes: u64,
         dimensions: Option<(u32, u32)>,
         source: ArtworkSource,
+        is_upgrade: bool,
     ) -> bool {
         if let Some(existing) = &self.state.artwork {
             if existing.sha256 == sha256 {
@@ -158,10 +199,31 @@ impl Machine {
             width: dimensions.map(|d| d.0),
             height: dimensions.map(|d| d.1),
             source,
-            is_upgrade: false,
+            is_upgrade,
         });
         self.counters.artwork_updates += 1;
         true
+    }
+
+    /// Tally one enrichment attempt.
+    pub fn record_enrichment(&mut self, outcome: EnrichmentOutcome, rate_limited: bool) {
+        let c = &mut self.counters.enrichment;
+        c.attempted += 1;
+        if rate_limited {
+            c.rate_limited += 1;
+        }
+        match outcome {
+            EnrichmentOutcome::CacheHit => c.cache_hits += 1,
+            EnrichmentOutcome::NegativeCacheHit => c.negative_cache_hits += 1,
+            EnrichmentOutcome::TextRejected => c.text_rejections += 1,
+            EnrichmentOutcome::SizeRejected => c.size_rejections += 1,
+            EnrichmentOutcome::PerceptualRejected => c.perceptual_rejections += 1,
+            EnrichmentOutcome::Upgraded => c.upgrades += 1,
+            EnrichmentOutcome::NetworkError => c.network_errors += 1,
+            // Counted as an attempt and nothing else: "no catalogue had this
+            // album" is not a gate rejection and must not look like one.
+            EnrichmentOutcome::NoMatch => {}
+        }
     }
 
     /// The next moment a timer could change something, so the runtime can

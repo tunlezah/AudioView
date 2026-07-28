@@ -8,6 +8,7 @@
 #![deny(unsafe_code)]
 
 pub mod artwork;
+pub mod enrich;
 pub mod hub;
 pub mod ipc;
 pub mod machine;

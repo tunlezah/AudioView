@@ -1,0 +1,9 @@
+[package]
+name = "lpframe-image"
+description = "LP Frame colour conversions, perceptual hashing and resampling"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]

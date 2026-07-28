@@ -75,6 +75,19 @@ async fn main() -> Result<()> {
     let clock = Arc::new(MonotonicClock::default());
     let mut core = Core::new(cfg.clone(), hub.clone(), clock, Box::new(LoggingAmp))?;
 
+    // The sender is kept here as well as handed to the enricher. With
+    // enrichment disabled nothing else holds one, and a closed channel makes
+    // `recv()` return immediately — which would turn the select loop below
+    // into a spin at full CPU on a device that is meant to cost nothing idle.
+    let (enrich_tx, mut enrich_rx) = tokio::sync::mpsc::channel(16);
+    let _enrich_tx = enrich_tx.clone();
+    // A cache directory we cannot open is not worth failing the service for:
+    // the device still plays music and still shows AirPlay art.
+    match artd::enrich::Enricher::new(&cfg, Default::default(), enrich_tx) {
+        Ok(enricher) => core.set_enricher(enricher),
+        Err(e) => tracing::warn!("artwork enrichment is unavailable: {e}"),
+    }
+
     // Publish an initial snapshot so a client that connects before any
     // metadata arrives gets a state rather than silence.
     hub.publish(core.machine().state().clone());
@@ -136,6 +149,11 @@ async fn main() -> Result<()> {
             cmd = cmd_rx.recv() => {
                 if let Some(cmd) = cmd {
                     core.handle_command(cmd);
+                }
+            }
+            report = enrich_rx.recv() => {
+                if let Some(report) = report {
+                    core.handle_enrichment(report);
                 }
             }
             _ = tokio::time::sleep(sleep) => core.handle(Input::Tick),
