@@ -198,16 +198,40 @@ fn run_sdl2(cli: &Cli, cfg: Config, source: &mut dyn Source) -> Result<()> {
         if drew {
             win.present();
         }
-        // Sleep until something can actually change, rather than spinning.
+        // Wait until something can actually change, rather than spinning.
         // The same discipline as the device: a static image costs nothing.
+        // The cap keeps window events responsive, since SDL has no fd to
+        // fold into the wait.
         let now = app.now_ms();
-        let sleep = app
+        let wait = app
             .next_wakeup_ms(source)
-            .map(|t| t.saturating_sub(now).min(250))
+            .map(|t| t.saturating_sub(now).min(50))
             .unwrap_or(50);
-        std::thread::sleep(std::time::Duration::from_millis(sleep.max(1)));
+        match source.wakeup_fd() {
+            Some(fd) => wait_readable(fd, wait.max(1)),
+            None => std::thread::sleep(std::time::Duration::from_millis(wait.max(1))),
+        }
     }
     Ok(())
+}
+
+/// Block until `fd` is readable or `timeout_ms` elapses.
+///
+/// Used by the windowed backend so a live source wakes it immediately rather
+/// than being noticed on the next tick.
+#[cfg(feature = "backend-sdl2")]
+#[allow(unsafe_code)]
+fn wait_readable(fd: std::os::fd::RawFd, timeout_ms: u64) {
+    let mut pfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: a single live pollfd whose descriptor is owned by the source
+    // and outlives this call.
+    unsafe {
+        libc::poll(&mut pfd, 1, timeout_ms.min(i32::MAX as u64) as i32);
+    }
 }
 
 #[cfg(not(feature = "backend-sdl2"))]
@@ -326,7 +350,7 @@ fn present_loop(
             .min(until_probe);
         // A floor, so a source asking to be woken in the past cannot turn the
         // idle path into a spin.
-        display.wait_idle(timeout.max(1))?;
+        display.wait_idle(timeout.max(1), source.wakeup_fd())?;
     }
 }
 

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use crate::source::{Source, Wanted};
+use crate::source::{Source, Update, Wanted};
 
 /// A directory of images, cycled on a timer. The milestone-3 deliverable:
 /// the whole render path with no `artd` involved.
@@ -52,7 +52,7 @@ impl Slideshow {
 }
 
 impl Source for Slideshow {
-    fn poll(&mut self, now_ms: u64) -> Option<Wanted> {
+    fn poll(&mut self, now_ms: u64) -> Option<Update> {
         if self.started && now_ms < self.next_at_ms {
             return None;
         }
@@ -61,13 +61,13 @@ impl Source for Slideshow {
         }
         self.started = true;
         self.next_at_ms = now_ms + self.interval_ms;
-        Some(Wanted {
+        Some(Update::Show(Wanted {
             // Monotonic across wraps, so revisiting an image still counts as
             // a change and crossfades rather than silently doing nothing.
             id: self.index as u64 + 1,
             path: self.files[self.index].clone(),
             is_upgrade: false,
-        })
+        }))
     }
 
     fn next_wakeup_ms(&self, _now_ms: u64) -> Option<u64> {
@@ -77,6 +77,15 @@ impl Source for Slideshow {
 
 #[cfg(test)]
 mod tests {
+
+    /// Unwrap the common case: an update that shows an image.
+    fn shown(u: Option<Update>) -> Option<Wanted> {
+        match u {
+            Some(Update::Show(w)) => Some(w),
+            Some(Update::Clear) => panic!("expected an image, got a clear"),
+            None => None,
+        }
+    }
     use super::*;
 
     fn tmpdir(name: &str) -> PathBuf {
@@ -126,15 +135,19 @@ mod tests {
         write_png(&d, "b.png");
         let mut s = Slideshow::new(&d, 1000).unwrap();
 
-        let first = s.poll(0).expect("first image immediately");
+        let first = shown(s.poll(0)).expect("first image immediately");
         assert!(first.path.ends_with("a.png"));
-        assert_eq!(s.poll(500), None, "advanced before the interval elapsed");
+        assert_eq!(
+            shown(s.poll(500)),
+            None,
+            "advanced before the interval elapsed"
+        );
 
-        let second = s.poll(1000).expect("second image");
+        let second = shown(s.poll(1000)).expect("second image");
         assert!(second.path.ends_with("b.png"));
         assert_ne!(second.id, first.id);
 
-        let third = s.poll(2000).expect("wrapped back around");
+        let third = shown(s.poll(2000)).expect("wrapped back around");
         assert!(third.path.ends_with("a.png"));
         let _ = std::fs::remove_dir_all(&d);
     }

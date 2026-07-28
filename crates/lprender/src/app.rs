@@ -16,7 +16,7 @@ use crate::decode::{Decoded, Decoder};
 use crate::geometry::{layout, LayoutConfig};
 use crate::gl::{DrawCall, Renderer, Texture};
 use crate::scene::{Scene, Timings};
-use crate::source::{Source, Wanted};
+use crate::source::{Source, Update, Wanted};
 
 /// Resident images, keyed by the id the scene refers to.
 struct Images {
@@ -50,6 +50,10 @@ impl Images {
     }
 }
 
+/// Reserved image id for the placeholder, well clear of any artwork
+/// revision the daemon will ever publish.
+const PLACEHOLDER_ID: u64 = u64::MAX;
+
 pub struct App {
     pub scene: Scene,
     cfg: Config,
@@ -59,6 +63,7 @@ pub struct App {
     pending: Option<Wanted>,
     started: Instant,
     max_edge: u32,
+    warned_placeholder: bool,
 }
 
 impl App {
@@ -82,6 +87,7 @@ impl App {
             pending: None,
             started: Instant::now(),
             max_edge,
+            warned_placeholder: false,
         }
     }
 
@@ -114,11 +120,15 @@ impl App {
     /// headless dump — does not have to poll the source itself and
     /// accidentally consume the update this call was going to see.
     pub fn update_at(&mut self, renderer: &mut Renderer, source: &mut dyn Source, now: u64) {
-        if let Some(wanted) = source.poll(now) {
-            if Some(wanted.id) != self.scene.current() {
-                self.decoder.request(&wanted.path, wanted.id, self.max_edge);
-                self.pending = Some(wanted);
+        match source.poll(now) {
+            Some(Update::Show(wanted)) => {
+                if Some(wanted.id) != self.scene.current() {
+                    self.decoder.request(&wanted.path, wanted.id, self.max_edge);
+                    self.pending = Some(wanted);
+                }
             }
+            Some(Update::Clear) => self.clear_artwork(now),
+            None => {}
         }
         self.scene.set_power(source.power(), now);
 
@@ -154,6 +164,40 @@ impl App {
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
+    }
+
+    /// The track has no artwork.
+    ///
+    /// Shows the configured placeholder if there is a usable one, and
+    /// otherwise fades the last cover out. Either beats leaving the previous
+    /// album on screen, which is wrong rather than merely empty.
+    fn clear_artwork(&mut self, now: u64) {
+        let placeholder = self.cfg.render.placeholder.clone();
+        if placeholder.is_file() {
+            if self.scene.current() == Some(PLACEHOLDER_ID) {
+                return;
+            }
+            self.decoder
+                .request(&placeholder, PLACEHOLDER_ID, self.max_edge);
+            self.pending = Some(Wanted {
+                id: PLACEHOLDER_ID,
+                path: placeholder,
+                is_upgrade: false,
+            });
+            return;
+        }
+
+        // Configured but absent is worth saying once: a device showing black
+        // where a placeholder was expected looks like a bug.
+        if !self.warned_placeholder && !placeholder.as_os_str().is_empty() {
+            self.warned_placeholder = true;
+            tracing::info!(
+                "no artwork for this track and no placeholder at {}; fading out",
+                placeholder.display()
+            );
+        }
+        self.pending = None;
+        self.scene.clear(now);
     }
 
     fn admit(&mut self, renderer: &mut Renderer, decoded: Decoded, now: u64) {

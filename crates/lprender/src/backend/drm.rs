@@ -20,7 +20,7 @@
 
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::os::fd::{AsFd, AsRawFd, BorrowedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -45,10 +45,14 @@ const PLATFORM_GBM: khronos_egl::Enum = 0x31D7;
 
 /// How long to wait for a page-flip event before giving up on the commit.
 ///
-/// Generous: three frames at 20Hz. A flip that has not completed by then
-/// means the pipeline is wedged, and hanging forever on the DRM fd would be
-/// indistinguishable from a working static image.
-const FLIP_TIMEOUT_MS: u64 = 150;
+/// How long to wait for a page-flip event before giving up on it.
+///
+/// One second is far longer than any real refresh interval, including a slow
+/// first flip after a modeset. It exists so a wedged pipeline cannot hang the
+/// loop forever, not to police frame timing — a missed flip is recovered
+/// from, never fatal, because aborting would leave a wall display dark with
+/// no console to read the error on.
+const FLIP_TIMEOUT_MS: u64 = 1000;
 
 /// How often the connector is re-probed for hotplug.
 pub const HOTPLUG_POLL: Duration = Duration::from_secs(2);
@@ -793,11 +797,42 @@ impl Display {
     /// This is where an idle device spends all its time. Nothing is drawn and
     /// nothing is flipped, so a static image costs exactly one `poll` wakeup
     /// per timeout (DESIGN §6.3).
-    pub fn wait_idle(&self, timeout_ms: u64) -> Result<()> {
+    /// Block until the DRM fd or `extra` becomes readable, or the timeout
+    /// expires.
+    ///
+    /// `extra` is the source's wakeup descriptor (see `Source::wakeup_fd`).
+    /// Carrying it here is what lets the loop sit indefinitely on a static
+    /// image and still react to a new track the moment it is published,
+    /// rather than waking on a timer to check.
+    pub fn wait_idle(&self, timeout_ms: u64, extra: Option<RawFd>) -> Result<()> {
         let ms = timeout_ms.min(i32::MAX as u64) as i32;
-        if poll_readable(self.card.as_fd(), ms)? {
+        let mut fds = vec![libc::pollfd {
+            fd: self.card.as_fd().as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        }];
+        if let Some(fd) = extra {
+            fds.push(libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            });
+        }
+
+        #[allow(unsafe_code)]
+        // SAFETY: `fds` is a live slice of the stated length; the descriptors
+        // outlive the call.
+        let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, ms) };
+        if rc < 0 {
+            let e = std::io::Error::last_os_error();
+            if e.kind() != std::io::ErrorKind::Interrupted {
+                return Err(e).context("poll on the DRM fd");
+            }
+            return Ok(());
+        }
+        if fds[0].revents & libc::POLLIN != 0 {
             // Stale events from a flip we already accounted for. Drain them
-            // so poll does not spin.
+            // so poll does not spin. The source drains its own wakeup.
             let _ = self.card.receive_events();
         }
         Ok(())
@@ -927,12 +962,16 @@ impl Display {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
-                bail!(
-                    "no page-flip event within {FLIP_TIMEOUT_MS}ms on {}. The \
-                     display pipeline has stalled; check dmesg for vc4 or v3d \
+                // Recovered, not fatal: drop the pending flip and carry on.
+                // The next frame re-submits. A device on a wall with no
+                // console must not exit because one flip was late.
+                tracing::warn!(
+                    "no page-flip event within {FLIP_TIMEOUT_MS}ms on {}; \
+                     continuing. If this repeats, check dmesg for vc4 or v3d \
                      errors",
                     self.description
                 );
+                return Ok(());
             }
             if !poll_readable(self.card.as_fd(), left.as_millis() as i32)? {
                 continue;
@@ -1080,22 +1119,36 @@ fn init_egl(
     // The config's native visual must be the surface's format or the driver
     // silently renders into something the display cannot scan out. Matching
     // it explicitly is the difference between a picture and a black panel.
-    let want = gbm::Format::Xrgb8888 as u32;
-    let config = configs
-        .iter()
-        .copied()
-        .find(|c| {
+    // XRGB8888 is what the GBM surface was created with, so prefer it. Fall
+    // back to ARGB8888: the alpha channel is ignored on scanout, and a
+    // working picture beats refusing to start because a driver only
+    // advertises the alpha variant.
+    let preferred = [
+        (gbm::Format::Xrgb8888 as u32, "XRGB8888"),
+        (gbm::Format::Argb8888 as u32, "ARGB8888"),
+    ];
+    let mut chosen = None;
+    for (want, name) in preferred {
+        if let Some(c) = configs.iter().copied().find(|c| {
             egl.get_config_attrib(display, *c, khronos_egl::NATIVE_VISUAL_ID)
                 .is_ok_and(|v| v as u32 == want)
-        })
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "no GLES3 EGL config with an XRGB8888 native visual among {} \
-                 candidates. The GBM backend and the EGL driver disagree about \
-                 formats — check that libgbm and libEGL come from the same Mesa",
-                configs.len()
-            )
-        })?;
+        }) {
+            if name != "XRGB8888" {
+                tracing::warn!("no XRGB8888 EGL config; falling back to {name}");
+            }
+            chosen = Some(c);
+            break;
+        }
+    }
+    let config = chosen.ok_or_else(|| {
+        anyhow::anyhow!(
+            "no GLES3 EGL config with an XRGB8888 or ARGB8888 native visual \
+             among {} candidates. The GBM backend and the EGL driver disagree \
+             about formats — check that libgbm and libEGL come from the same \
+             Mesa",
+            configs.len()
+        )
+    })?;
 
     let ctx_attribs = [khronos_egl::CONTEXT_MAJOR_VERSION, 3, khronos_egl::NONE];
     let context = egl
