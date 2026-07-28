@@ -10,7 +10,7 @@ license.workspace = true
 # The headless EGL backend is always available: it is how the shaders are
 # tested, on hardware and in CI alike.
 default = ["backend-drm", "backend-sdl2"]
-backend-drm = ["dep:drm", "dep:gbm"]
+backend-drm = ["dep:drm", "dep:gbm", "dep:libc"]
 backend-sdl2 = ["dep:sdl2"]
 
 [dependencies]
@@ -27,6 +27,9 @@ tracing-subscriber.workspace = true
 
 drm = { workspace = true, optional = true }
 gbm = { workspace = true, optional = true }
+# Only for poll(2) on the DRM fd: std has no way to wait on a raw fd with a
+# timeout, and that wait is the whole of the renderer's idle cost.
+libc = { workspace = true, optional = true }
 sdl2 = { workspace = true, optional = true }
 
 [dev-dependencies]
