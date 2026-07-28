@@ -26,3 +26,7 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 lpcapture = { path = "../lpcapture" }
+# For tests/renderer.rs, which drives the real renderer against a real
+# daemon. Only the headless EGL backend is wanted; DRM and SDL2 would drag
+# in libraries this crate has no other reason to link.
+lprender = { path = "../lprender", default-features = false }

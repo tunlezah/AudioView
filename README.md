@@ -25,8 +25,8 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 | 1 | `spmeta` parser + `lpcapture` | done |
 | 2 | `artd` core | done |
 | 3 | `lprender` static/slideshow | mostly done |
-| 4 | Integration | next |
-| 5 | Enrichment | |
+| 4 | Integration | done |
+| 5 | Enrichment | next |
 | 6 | Power management | |
 | 7 | Web interface | |
 | 8 | Provisioning + `docs/BUILD.md` | |
@@ -95,3 +95,39 @@ cargo run -p lprender -- --config provisioning/config.toml \
 On the device, `--probe` reports the card, connector and modes actually
 available, and whether the configured mode exists — run it before anything
 else on a new panel.
+
+### Running both together
+
+With no `--slideshow`, `lprender` follows `artd` over the socket at
+`ipc.socket` and shows whatever is playing. Start them in either order — they
+are ordered but not bound to each other, so the renderer waits on a black
+screen until the daemon appears, and survives it restarting.
+
+```bash
+cargo build --workspace
+mkdir -p /tmp/lp/art
+cat > /tmp/lp/config.toml <<EOF
+[device]
+metadata_pipe = "/tmp/lp/metadata"
+[ipc]
+socket = "/tmp/lp/artd.sock"
+art_dir = "/tmp/lp/art"
+[web]
+bind = "127.0.0.1:8730"
+EOF
+
+./target/debug/artd --config /tmp/lp/config.toml --config-local /nonexistent &
+./target/debug/lprender --config /tmp/lp/config.toml --config-local /nonexistent \
+    --backend sdl2 --size 720x720 &
+
+# Replay a recorded session; the window crossfades through the album
+./target/debug/lpcapture replay fixtures/sessions/album.pipe --to /tmp/lp/metadata
+```
+
+Kill and restart either process while the other runs: the protocol publishes
+a full snapshot on every change, so the renderer is correct again on the
+first message after it reconnects. `--backend headless --dump /tmp/frames`
+does the same with no display at all.
+
+On a device, `systemd/` has the units and `systemd/README.md` explains the
+one ordering constraint that must not be tidied up.

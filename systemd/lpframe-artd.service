@@ -1,0 +1,48 @@
+[Unit]
+Description=LP Frame metadata, artwork and power daemon
+Documentation=https://github.com/tunlezah/AudioView
+After=network-online.target
+Wants=network-online.target
+# Load-bearing, and the reason systemd/README.md exists: artd creates the
+# metadata FIFO and must already be reading it before shairport-sync can
+# write. shairport-sync discards metadata written while no reader is
+# attached, so the reverse order silently loses the first bundle of every
+# boot (DESIGN §8.1).
+Before=shairport-sync.service
+# Never Requires= lpframe-lprender.service: the two restart independently,
+# which is what the snapshot protocol is for.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/artd --config /etc/lpframe/config.toml --config-local /var/lib/lpframe/config.local.toml
+Restart=always
+RestartSec=2
+
+User=lpframe
+Group=lpframe
+# /run/lpframe holds the socket and the artwork tmpfs; /var/lib/lpframe holds
+# the cache and the web interface's config.local.toml.
+RuntimeDirectory=lpframe
+RuntimeDirectoryMode=0750
+StateDirectory=lpframe
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+# The metadata FIFO lives in the real /tmp by default, shared with
+# shairport-sync, so this daemon cannot have a private one.
+PrivateTmp=no
+ReadWritePaths=/var/lib/lpframe /run/lpframe
+DevicePolicy=closed
+# By class, not by node: Pi 5 moved the header to the RP1 controller and the
+# gpiochipN numbering has shifted between kernel releases (DESIGN §5.5).
+DeviceAllow=char-gpiochip rw
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

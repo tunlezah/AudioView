@@ -1,0 +1,44 @@
+[Unit]
+Description=LP Frame fullscreen artwork renderer
+Documentation=https://github.com/tunlezah/AudioView
+# After multi-user.target because DRM master must be uncontended: getty@tty1
+# is masked and plymouth is gone by this point (DESIGN §6.2).
+After=lpframe-artd.service multi-user.target
+# Wants, deliberately not Requires: artd restarting must not take the screen
+# down, and the renderer starting first is normal. It reconnects with backoff
+# and the first snapshot it receives makes it correct (DESIGN §8.1).
+Wants=lpframe-artd.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/lprender --config /etc/lpframe/config.toml --config-local /var/lib/lpframe/config.local.toml --backend drm
+Restart=always
+RestartSec=2
+
+User=lpframe
+Group=lpframe
+SupplementaryGroups=video render
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+PrivateTmp=yes
+# The socket and the artwork it reads by path both live here. Read-only would
+# do for the artwork, but the socket needs write.
+ReadWritePaths=/run/lpframe
+DevicePolicy=closed
+# char-drm covers every /dev/dri node. Naming card0 explicitly would be
+# wrong: the numbering moves when the v3d render node enumerates first
+# (DESIGN §6.2).
+DeviceAllow=char-drm rw
+# Only the artd socket. No network of any kind: the renderer has no notion of
+# AirPlay, tracks, or HTTP.
+RestrictAddressFamilies=AF_UNIX
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

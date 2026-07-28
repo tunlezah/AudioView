@@ -84,6 +84,7 @@ dependencies = [
  "lpcapture",
  "lpframe-config",
  "lpframe-proto",
+ "lprender",
  "serde",
  "serde_json",
  "sha2",
@@ -788,6 +789,7 @@ dependencies = [
  "lpframe-config",
  "lpframe-proto",
  "sdl2",
+ "serde_json",
  "tracing",
  "tracing-subscriber",
 ]

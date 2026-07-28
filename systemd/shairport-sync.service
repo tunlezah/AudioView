@@ -1,0 +1,28 @@
+[Unit]
+Description=Shairport Sync AirPlay 2 receiver
+Documentation=https://github.com/mikebrady/shairport-sync
+# nqptp must be up for AirPlay 2 timing, and artd must be attached to the
+# metadata FIFO before the first bundle is written — see systemd/README.md
+# before reordering anything here.
+After=nqptp.service lpframe-artd.service network-online.target
+Wants=nqptp.service lpframe-artd.service network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/shairport-sync
+Restart=always
+RestartSec=2
+
+User=shairport-sync
+Group=shairport-sync
+SupplementaryGroups=audio
+# The metadata FIFO is in the real /tmp, shared with artd.
+PrivateTmp=no
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
