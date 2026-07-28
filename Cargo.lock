@@ -785,6 +785,7 @@ dependencies = [
  "glow",
  "image",
  "khronos-egl",
+ "libc",
  "lpframe-config",
  "lpframe-proto",
  "sdl2",

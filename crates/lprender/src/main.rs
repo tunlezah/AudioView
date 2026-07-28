@@ -195,23 +195,119 @@ fn run_sdl2(_cli: &Cli, _cfg: Config, _source: &mut dyn Source) -> Result<()> {
     anyhow::bail!("this binary was built without the backend-sdl2 feature")
 }
 
+/// The device: KMS/DRM with a GBM-backed GLES3 context.
+///
+/// Two nested loops. The outer one owns the scanout pipeline and rebuilds it
+/// on hotplug, so an unplugged panel idles here instead of ending the
+/// process. The inner one is the render-on-demand loop.
 #[cfg(feature = "backend-drm")]
-fn run_drm(_cli: &Cli, cfg: Config, _source: &mut dyn Source) -> Result<()> {
+fn run_drm(_cli: &Cli, cfg: Config, source: &mut dyn Source) -> Result<()> {
     use lprender::backend::drm as kms;
-    // Device discovery and mode selection are implemented and reachable via
-    // --probe; the GBM surface, atomic commit and page-flip loop are the
-    // remaining piece of milestone 3. Fail with something actionable rather
-    // than a black screen.
-    let card = kms::Card::open(&cfg.display.card)?;
-    let connector = card.connector(&cfg.display.connector)?;
-    let mode = kms::choose_mode(&connector, &cfg.display.mode)?;
-    let crtc = kms::choose_crtc(&card, &connector)?;
-    anyhow::bail!(
-        "display stack resolved ({}, crtc {crtc:?}) but the DRM present path \
-         is not wired up yet. Use --backend sdl2 or --backend headless; run \
-         --probe to inspect the panel.",
-        kms::describe(&connector, &mode)
-    )
+    use std::sync::Arc;
+
+    // Failures before the first modeset are configuration or permission
+    // problems that retrying cannot fix, so they end the process with the
+    // reason. Only a missing panel is treated as something to wait for.
+    let card = Arc::new(kms::Card::open(&cfg.display.card)?);
+    kms::acquire_master(&card)?;
+
+    let mut app: Option<App> = None;
+    let mut waiting = false;
+    loop {
+        if let Err(e) = card.connector(&cfg.display.connector) {
+            // A panel that is merely unplugged must not take the service
+            // down; systemd would restart it into the same state anyway.
+            if !waiting {
+                tracing::warn!("waiting for a display: {e:#}");
+                waiting = true;
+            }
+            std::thread::sleep(kms::HOTPLUG_POLL);
+            continue;
+        }
+        waiting = false;
+
+        let mut display = kms::Display::open(Arc::clone(&card), &cfg)?;
+        // Bound out of the log call: `tracing`'s macros bring their own
+        // `display` into scope and would resolve the method against it.
+        let what = display.description().to_string();
+        tracing::info!("presenting on {what}");
+
+        let panel = display.size();
+        // The app survives re-initialisation so that a mode change does not
+        // blank the artwork while it decodes again. Its texture-size cap is
+        // fixed at construction, so a panel that grows keeps the smaller cap
+        // until the process restarts — a soft picture beats a black one.
+        let app = app.get_or_insert_with(|| App::new(cfg.clone(), panel));
+        display.renderer().set_panel(panel);
+
+        match present_loop(app, &mut display, source, &cfg)? {
+            kms::Hotplug::Disconnected => tracing::warn!("display disconnected"),
+            kms::Hotplug::ModeChanged => tracing::info!("display mode changed; re-initialising"),
+            kms::Hotplug::Unchanged => unreachable!("the present loop only exits on a change"),
+        }
+    }
+}
+
+/// Draw, flip and sleep until the connector changes underneath us.
+///
+/// The important property is what happens when nothing is animating: no
+/// draw, no page flip, and a blocking wait on the DRM fd (DESIGN §6.3). A
+/// static image costs one wakeup per hotplug poll and nothing else.
+#[cfg(feature = "backend-drm")]
+fn present_loop(
+    app: &mut App,
+    display: &mut lprender::backend::drm::Display,
+    source: &mut dyn Source,
+    cfg: &Config,
+) -> Result<lprender::backend::drm::Hotplug> {
+    use lprender::backend::drm::{Hotplug, HOTPLUG_POLL};
+    use std::time::Instant;
+
+    let mut next_probe = Instant::now() + HOTPLUG_POLL;
+    loop {
+        let now = app.now_ms();
+        app.update_at(display.renderer(), source, now);
+
+        let mut drew = false;
+        if app.blanked() {
+            // The fade has reached zero, so scanning out black is wasted
+            // power: switch the CRTC off instead.
+            display.blank()?;
+        } else {
+            display.unblank()?;
+            // The whole point of the renderer: no draw and no flip unless
+            // the scene says something has actually changed.
+            if app.scene.needs_frame(now) {
+                app.draw(display.renderer(), now);
+                display.present()?;
+                drew = true;
+            }
+        }
+
+        if Instant::now() >= next_probe {
+            next_probe = Instant::now() + HOTPLUG_POLL;
+            match display.poll_hotplug(cfg) {
+                Hotplug::Unchanged => {}
+                change => return Ok(change),
+            }
+        }
+
+        if drew {
+            // `present` already blocked until the flip landed, which paces
+            // us to vsync. Going straight round keeps the crossfade smooth.
+            continue;
+        }
+        let until_probe = next_probe
+            .saturating_duration_since(Instant::now())
+            .as_millis() as u64;
+        let timeout = app
+            .next_wakeup_ms(source)
+            .map_or(u64::MAX, |t| t.saturating_sub(app.now_ms()))
+            .min(until_probe);
+        // A floor, so a source asking to be woken in the past cannot turn the
+        // idle path into a spin.
+        display.wait_idle(timeout.max(1))?;
+    }
 }
 
 #[cfg(not(feature = "backend-drm"))]
