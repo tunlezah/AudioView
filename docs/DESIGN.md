@@ -836,7 +836,7 @@ Following the requested order. Each milestone ends with something demonstrable.
 | 1 | `spmeta` parser | **Done.** Library + fixture tests, `lpcapture`, synthetic fixture set, CI. |
 | 2 | `artd` core | **Done.** State machine, IPC server, AirPlay-art-only path, read-only web pages, `lpctl`. Power state is computed and published as *intent*; the GPIO backend lands in milestone 6. |
 | 3 | `lprender` static/slideshow | **Mostly done.** Shared GLES3 renderer, layout, scene, decode, slideshow source; SDL2 and headless backends; 16 golden images across the panel matrix. DRM device discovery and mode selection are in (`--probe`); the GBM surface, atomic commit and page-flip loop are outstanding. |
-| 4 | Integration | Renderer driven by `artd`. Play from a phone → art appears and crossfades. **This is the first end-to-end device.** |
+| 4 | Integration | **Done.** Renderer driven by `artd` over the socket, reconnecting with backoff; systemd units with the `Before=shairport-sync` ordering; an end-to-end test running a real daemon, a replayed session and the headless renderer. Play from a phone → art appears and crossfades. **This is the first end-to-end device**, subject to milestone 3's outstanding DRM present path. |
 | 5 | Enrichment | iTunes + MusicBrainz, both gates, cache, rate limiting. |
 | 6 | Power management | GPIO amp trigger, display blanking, ambient mode, fade-to-black + CRTC off. |
 | 7 | Web interface | Config layering, settings/diagnostics UI, auth, confirm-or-revert. |

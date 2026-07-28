@@ -1,15 +1,17 @@
 //! `lprender` — the LP Frame fullscreen artwork renderer.
 //!
-//! Milestone 3 ships the slideshow path: the whole render pipeline driven
-//! from a directory of images, with no `artd` and no Pi. Following the
-//! daemon's socket is milestone 4.
+//! Two sources, the same render path behind both: `artd` over its Unix
+//! socket, which is the device, and `--slideshow`, which is a directory of
+//! images with no daemon and no Pi. The slideshow stays useful forever as a
+//! smoke test (DESIGN §6.4).
 
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 use lpframe_config::Config;
-use lprender::app::{App, Slideshow, Source};
+use lprender::app::App;
+use lprender::source::{ArtdSource, Slideshow, Source};
 
 #[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
 enum BackendKind {
@@ -88,11 +90,13 @@ fn main() -> Result<()> {
             tracing::info!("slideshow: {} image(s) from {}", s.len(), dir.display());
             Box::new(s)
         }
-        // Following artd lands in milestone 4. Say so rather than sitting on
-        // a black screen with no explanation.
-        None => anyhow::bail!(
-            "no source: pass --slideshow DIR. Following artd arrives with milestone 4."
-        ),
+        // Not an error if artd is not up: the two services are ordered but
+        // not bound together, so the renderer waits on a black screen and
+        // connects when the daemon appears (DESIGN §8.1).
+        None => {
+            tracing::info!("following artd at {}", cfg.ipc.socket.display());
+            Box::new(ArtdSource::new(&cfg.ipc.socket))
+        }
     };
 
     match cli.backend {

@@ -13,3 +13,4 @@ pub mod decode;
 pub mod geometry;
 pub mod gl;
 pub mod scene;
+pub mod source;

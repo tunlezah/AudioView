@@ -1,0 +1,21 @@
+[Unit]
+Description=Network Precision Time Protocol daemon for AirPlay 2 (nqptp)
+Documentation=https://github.com/mikebrady/nqptp
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nqptp
+Restart=always
+RestartSec=2
+
+# Root, and no sandboxing to speak of: nqptp binds the privileged PTP ports
+# 319 and 320 and needs the system clock. This is upstream's own arrangement.
+User=root
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SYS_TIME
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
