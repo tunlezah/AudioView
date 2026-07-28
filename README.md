@@ -13,7 +13,7 @@ Square panels are the intent, but any resolution, aspect ratio, orientation, or 
 | `shairport-sync` + `nqptp` | AirPlay 2 receiver → ALSA → USB DAC (configured, not written here) |
 | `spmeta` | Parser for the shairport-sync metadata pipe |
 | `artd` | Metadata state machine, artwork enrichment, amp/display power, web interface |
-| `lprender` | Fullscreen KMS/DRM + GLES3 renderer |
+| `lprender` | Fullscreen KMS/DRM + GLES3 renderer (SDL2 and headless dev backends) |
 | `lpcapture` | Records real AirPlay sessions to replayable fixtures |
 
 ## Status
@@ -24,8 +24,8 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 |---|---|---|
 | 1 | `spmeta` parser + `lpcapture` | done |
 | 2 | `artd` core | done |
-| 3 | `lprender` static/slideshow | next |
-| 4 | Integration | |
+| 3 | `lprender` static/slideshow | mostly done |
+| 4 | Integration | next |
 | 5 | Enrichment | |
 | 6 | Power management | |
 | 7 | Web interface | |
@@ -67,3 +67,31 @@ EOF
 
 Then open <http://127.0.0.1:8730/> for Now Playing and diagnostics. On a real
 device, point `metadata_pipe` at shairport-sync's pipe instead of replaying.
+
+### Running the renderer without a Pi
+
+`lprender` needs EGL, GLES, GBM, DRM and SDL2 development packages:
+
+```bash
+sudo apt-get install -y libegl-dev libgles-dev libgbm-dev libdrm-dev \
+                        libsdl2-dev libegl1-mesa-dev
+```
+
+Cycle a directory of images through the real render path — crossfades,
+letterboxing, blurred background and all:
+
+```bash
+# In a window
+cargo run -p lprender -- --config provisioning/config.toml \
+    --config-local /nonexistent --backend sdl2 --size 720x720 \
+    --slideshow ./pictures --interval 5
+
+# Or to PNG files, with no display at all (this is what CI runs)
+cargo run -p lprender -- --config provisioning/config.toml \
+    --config-local /nonexistent --backend headless --size 400x225 \
+    --slideshow ./pictures --interval 2 --frames 120 --dump /tmp/frames
+```
+
+On the device, `--probe` reports the card, connector and modes actually
+available, and whether the configured mode exists — run it before anything
+else on a new panel.

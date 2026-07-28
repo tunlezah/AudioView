@@ -1,0 +1,34 @@
+[package]
+name = "lprender"
+description = "LP Frame fullscreen artwork renderer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+# The headless EGL backend is always available: it is how the shaders are
+# tested, on hardware and in CI alike.
+default = ["backend-drm", "backend-sdl2"]
+backend-drm = ["dep:drm", "dep:gbm"]
+backend-sdl2 = ["dep:sdl2"]
+
+[dependencies]
+lpframe-config.workspace = true
+lpframe-proto.workspace = true
+
+anyhow.workspace = true
+clap.workspace = true
+glow.workspace = true
+image.workspace = true
+khronos-egl.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+drm = { workspace = true, optional = true }
+gbm = { workspace = true, optional = true }
+sdl2 = { workspace = true, optional = true }
+
+[dev-dependencies]
+image.workspace = true
+

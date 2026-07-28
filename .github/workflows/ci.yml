@@ -18,9 +18,20 @@ jobs:
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
+      # lprender links EGL/GLES/GBM/DRM/SDL2. The renderer tests run the real
+      # shaders through surfaceless EGL on llvmpipe, so Mesa is required, not
+      # optional — without it the golden images would silently stop running.
+      - name: Install graphics stack
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libegl-dev libgles-dev libgbm-dev libdrm-dev libsdl2-dev \
+            libegl1-mesa-dev mesa-utils
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
       # Fixtures and their golden logs must match the generator and the
       # current decoder, so neither can drift unnoticed.
       - run: cargo run -q -p lpcapture -- golden --check
@@ -33,11 +44,24 @@ jobs:
         with:
           targets: aarch64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-      - run: cargo build --workspace --release --target aarch64-unknown-linux-gnu
+      # Cross-compiling lprender needs the arm64 graphics libraries too.
+      - run: |
+          sudo dpkg --add-architecture arm64
+          sudo sed -i 's|^deb |deb [arch=amd64] |' /etc/apt/sources.list.d/*.sources 2>/dev/null || true
+          sudo apt-get update -qq || true
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+      # artd and the shared crates cross-build cleanly; lprender needs arm64
+      # sysroot libraries that are awkward on a plain runner, so it is built
+      # on the device (or in the pi-gen image) instead — see milestone 8.
+      - run: |
+          cargo build --release --target aarch64-unknown-linux-gnu \
+            -p spmeta -p lpframe-proto -p lpframe-config -p artd -p lpctl -p lpcapture
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
       - uses: actions/upload-artifact@v4
         with:
           name: lpframe-aarch64
-          path: target/aarch64-unknown-linux-gnu/release/lpcapture
+          path: |
+            target/aarch64-unknown-linux-gnu/release/artd
+            target/aarch64-unknown-linux-gnu/release/lpctl
+            target/aarch64-unknown-linux-gnu/release/lpcapture
