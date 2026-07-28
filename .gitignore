@@ -1,2 +1,7 @@
 /target
 *.raw
+
+# Scratch worktrees created for background agents. Transient, and not part
+# of the project; ignore the path rather than all of .claude/, which may
+# hold real project settings later.
+/.claude/worktrees/
