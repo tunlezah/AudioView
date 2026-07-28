@@ -24,7 +24,7 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 |---|---|---|
 | 1 | `spmeta` parser + `lpcapture` | done |
 | 2 | `artd` core | done |
-| 3 | `lprender` static/slideshow | mostly done |
+| 3 | `lprender` static/slideshow | done — DRM path unverified on hardware |
 | 4 | Integration | done |
 | 5 | Enrichment | next |
 | 6 | Power management | |

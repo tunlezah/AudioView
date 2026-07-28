@@ -29,6 +29,17 @@ pub trait Source {
     fn next_wakeup_ms(&self, _now_ms: u64) -> Option<u64> {
         None
     }
+
+    /// Whether this source is driven by the outside world rather than by the
+    /// clock the caller passes in.
+    ///
+    /// The headless dump simulates time so a slideshow renders reproducibly.
+    /// Against a live source that is wrong: it races through every frame in a
+    /// fraction of a real second and dumps black, because nothing has arrived
+    /// yet. A live source makes the caller pace in real time instead.
+    fn is_live(&self) -> bool {
+        false
+    }
 }
 
 /// An image the source would like shown.

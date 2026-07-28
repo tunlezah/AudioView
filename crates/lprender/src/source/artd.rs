@@ -156,6 +156,10 @@ impl Source for ArtdSource {
             .map_or(DisplayPower::Off, |s| s.power.display)
     }
 
+    fn is_live(&self) -> bool {
+        true
+    }
+
     fn next_wakeup_ms(&self, now_ms: u64) -> Option<u64> {
         // Snapshots land on the reader thread, so nothing in the render loop
         // is woken by them. Until the DRM loop carries the socket in its

@@ -144,11 +144,27 @@ fn run_headless(cli: &Cli, cfg: Config, source: &mut dyn Source) -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
 
+    // A slideshow is driven by the clock we hand it, so simulated time makes
+    // the dump reproducible. A live source is not: racing through every frame
+    // in a fraction of a real second would dump black, because artd has not
+    // published anything yet.
+    let live = source.is_live();
+    if live {
+        tracing::info!("live source: pacing the dump in real time");
+    }
+    let started = std::time::Instant::now();
+
     let mut drawn = 0u32;
     for i in 0..cli.frames {
-        // Simulated time, so a dump is reproducible rather than depending on
-        // how fast the machine happens to be.
-        let now = i as u64 * cli.frame_ms;
+        let now = if live {
+            let target = std::time::Duration::from_millis(i as u64 * cli.frame_ms);
+            if let Some(wait) = target.checked_sub(started.elapsed()) {
+                std::thread::sleep(wait);
+            }
+            started.elapsed().as_millis() as u64
+        } else {
+            i as u64 * cli.frame_ms
+        };
         app.update_at(hl.renderer(), source, now);
         // Simulated time outruns the decode thread; wait for it rather than
         // dumping black frames that misrepresent what the device would show.
