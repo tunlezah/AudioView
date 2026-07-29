@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use artd::hub::Hub;
 use artd::ipc::{Command, Server};
 use artd::machine::Input;
-use artd::runtime::{Core, LoggingAmp, MonotonicClock};
+use artd::runtime::{AmpBackend, Core, LoggingAmp, MonotonicClock};
 use clap::Parser;
 use lpframe_config::Config;
 
@@ -30,6 +30,28 @@ struct Cli {
     /// Validate the configuration and exit.
     #[arg(long)]
     check_config: bool,
+}
+
+/// Open the amplifier trigger, falling back to logging transitions.
+///
+/// A GPIO line we cannot take is not worth failing the service for: the
+/// device still plays music and still shows artwork, and the alternative is a
+/// silent speaker because a pin was busy.
+fn open_amp(cfg: &lpframe_config::Amp) -> Box<dyn AmpBackend> {
+    if !cfg.enabled {
+        tracing::info!("amp trigger disabled by configuration");
+        return Box::new(LoggingAmp);
+    }
+    match artd::gpio::GpioAmp::open(cfg) {
+        Ok(amp) => {
+            tracing::info!("amp trigger ready on {}", amp.describe());
+            Box::new(amp)
+        }
+        Err(e) => {
+            tracing::warn!("amp trigger unavailable, logging transitions only: {e:#}");
+            Box::new(LoggingAmp)
+        }
+    }
 }
 
 #[tokio::main]
@@ -73,7 +95,8 @@ async fn main() -> Result<()> {
 
     let hub = Hub::new(cfg.logging.event_buffer);
     let clock = Arc::new(MonotonicClock::default());
-    let mut core = Core::new(cfg.clone(), hub.clone(), clock, Box::new(LoggingAmp))?;
+    let amp = open_amp(&cfg.power.amp);
+    let mut core = Core::new(cfg.clone(), hub.clone(), clock, amp)?;
 
     // The sender is kept here as well as handed to the enricher. With
     // enrichment disabled nothing else holds one, and a closed channel makes
@@ -168,5 +191,6 @@ async fn main() -> Result<()> {
         }
     }
 
+    core.shutdown();
     Ok(())
 }

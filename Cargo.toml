@@ -50,6 +50,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 drm = "0.14"
 gbm = "0.18"
 sdl2 = { version = "0.37", default-features = false }
+# libgpiod v2 character-device GPIO, pure Rust: no C library to cross-compile.
+gpiocdev = "0.8"
 
 [profile.release]
 opt-level = 2

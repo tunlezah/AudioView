@@ -15,6 +15,7 @@ spmeta.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 clap.workspace = true
+gpiocdev.workspace = true
 image.workspace = true
 libc.workspace = true
 reqwest.workspace = true

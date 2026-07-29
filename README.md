@@ -28,8 +28,8 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 | 3 | `lprender` static/slideshow | done — DRM path unverified on hardware |
 | 4 | Integration | done |
 | 5 | Enrichment | done — gate thresholds unvalidated against real cover art |
-| 6 | Power management | next |
-| 7 | Web interface | |
+| 6 | Power management | done — GPIO line driving unverified on hardware |
+| 7 | Web interface | next |
 | 8 | Provisioning + `docs/BUILD.md` | |
 
 ## Developing

@@ -9,6 +9,7 @@
 
 pub mod artwork;
 pub mod enrich;
+pub mod gpio;
 pub mod hub;
 pub mod ipc;
 pub mod machine;

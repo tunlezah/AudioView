@@ -52,6 +52,9 @@ max_bytes = "2GiB"
 negative_ttl = "168h"
 
 [power.amp]
+# The optocoupler input needs an external pull-down (pull-up if active_low)
+# holding it in the amplifier-off state. artd drives the line off on SIGTERM,
+# but nothing runs on SIGKILL or a power cut — see systemd/README.md.
 enabled = true
 gpio_chip = "auto"                       # or a label: pinctrl-rp1, pinctrl-bcm2835
 gpio_line = 17

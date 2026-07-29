@@ -551,3 +551,68 @@ fn a_settled_idle_device_has_no_pending_deadline() {
     assert!(!m.state().power.amp);
     assert_eq!(m.state().power.display, DisplayPower::Off);
 }
+
+// --- power management (milestone 6) --------------------------------------
+
+#[test]
+fn ambient_precedes_blanking_when_it_is_configured() {
+    // Off by default, so this is the path most likely to rot unnoticed.
+    let mut cfg = test_config(scratch("ambient"));
+    cfg.power.display.ambient_after = lpframe_config::MaybeDuration::secs(30);
+    cfg.power.display.blank_after = Dur::from_secs(300);
+    let mut m = Machine::new(cfg, 0);
+
+    meta(&mut m, MetaEvent::ActiveBegin, 0);
+    meta(&mut m, MetaEvent::PlayBegin, 100);
+    meta(&mut m, MetaEvent::FirstFrame, 200);
+    assert_eq!(m.state().power.display, DisplayPower::On);
+
+    meta(&mut m, MetaEvent::ActiveEnd, 1_000);
+    assert_eq!(m.state().power.display, DisplayPower::On, "just went idle");
+
+    m.apply(Input::Tick, 1_000 + 30_000);
+    assert_eq!(
+        m.state().power.display,
+        DisplayPower::Ambient,
+        "ambient never engaged"
+    );
+
+    m.apply(Input::Tick, 1_000 + 300_000);
+    assert_eq!(m.state().power.display, DisplayPower::Off);
+
+    // And playing again wakes it straight back to full brightness.
+    meta(&mut m, MetaEvent::ActiveBegin, 400_000);
+    assert_eq!(m.state().power.display, DisplayPower::On);
+}
+
+#[test]
+fn the_amp_backend_is_driven_off_on_shutdown() {
+    // The orderly half of the guarantee. The disorderly half is the external
+    // pull-down resistor, which no test can stand in for.
+    use artd::runtime::RecordingAmp;
+    let amp = RecordingAmp::default();
+    let log = amp.0.clone();
+    let clock = Arc::new(TestClock::default());
+    let hub = Hub::new(16);
+    let mut core = Core::new(
+        test_config(scratch("shutdown")),
+        hub,
+        clock.clone() as Arc<dyn Clock>,
+        Box::new(amp),
+    )
+    .unwrap();
+
+    core.handle(Input::Meta(MetaEvent::ActiveBegin));
+    assert_eq!(
+        log.lock().unwrap().last().map(|e| e.1),
+        Some(true),
+        "the amp never came on"
+    );
+
+    core.shutdown();
+    assert_eq!(
+        log.lock().unwrap().last().map(|e| e.1),
+        Some(false),
+        "shutdown left the amplifier powered"
+    );
+}

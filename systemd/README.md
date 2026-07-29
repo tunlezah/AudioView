@@ -90,3 +90,19 @@ To confirm the ordering actually resolved the way you expect:
 systemctl list-dependencies --before lpframe-artd.service
 systemd-analyze critical-chain lpframe-lprender.service
 ```
+
+## The amplifier trigger needs a resistor
+
+`artd` drives the GPIO line inactive on `SIGTERM` and again when the line
+request is dropped, so `systemctl stop` and a clean reboot both leave the
+amplifier off.
+
+Neither covers `SIGKILL`, a kernel panic, or the Pi losing power. In all
+three the kernel releases the line and the pin reverts to being an input,
+with nothing driving it — and no software runs at that moment to help.
+
+**The optocoupler input must have an external pull-down resistor** holding it
+in the amplifier-off state (a pull-*up* if `power.amp.active_low` is set).
+10k to ground is typical. Without it a crash can leave an amplifier powered
+indefinitely, which is the one failure in this project that costs electricity
+and annoys neighbours rather than merely showing the wrong picture.

@@ -16,6 +16,12 @@ StartLimitIntervalSec=0
 [Service]
 Type=simple
 ExecStart=/usr/bin/artd --config /etc/lpframe/config.toml --config-local /var/lib/lpframe/config.local.toml
+
+# SIGTERM is handled: artd drives the amplifier trigger inactive and releases
+# the GPIO line before exiting. TimeoutStopSec is generous enough for a
+# momentary-pulse trigger to finish its pulse first.
+KillSignal=SIGTERM
+TimeoutStopSec=10
 Restart=always
 RestartSec=2
 
@@ -41,6 +47,9 @@ DevicePolicy=closed
 # By class, not by node: Pi 5 moved the header to the RP1 controller and the
 # gpiochipN numbering has shifted between kernel releases (DESIGN §5.5).
 DeviceAllow=char-gpiochip rw
+# The gpio group is what grants access to the character device; naming the
+# group rather than the node survives a kernel renumbering the chips.
+SupplementaryGroups=gpio
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 MemoryMax=512M
 

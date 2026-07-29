@@ -63,9 +63,9 @@ impl Clock for TestClock {
 
 /// Where amp transitions go.
 ///
-/// Milestone 2 ships only the logging backend: the state machine computes
-/// amp and display *intent* and publishes it, but nothing touches GPIO yet.
-/// The libgpiod backend arrives with milestone 6.
+/// The real implementation is `crate::gpio::GpioAmp`. This trait exists so
+/// the state machine's power policy can be tested without hardware, and so a
+/// device with no usable GPIO still runs and still plays music.
 pub trait AmpBackend: Send + 'static {
     fn set(&mut self, on: bool) -> Result<()>;
 }
@@ -75,8 +75,11 @@ pub struct LoggingAmp;
 
 impl AmpBackend for LoggingAmp {
     fn set(&mut self, on: bool) -> Result<()> {
+        // Reached when GPIO is unavailable or disabled. The transition is
+        // still worth recording: it is how you tell the policy is working
+        // when the wiring is not.
         tracing::info!(
-            "amp trigger -> {} (no GPIO backend yet)",
+            "amp trigger -> {} (no GPIO line held)",
             if on { "on" } else { "off" }
         );
         Ok(())
@@ -304,6 +307,22 @@ impl Core {
 
     pub fn now_ms(&self) -> u64 {
         self.clock.now_ms()
+    }
+
+    /// Drive the amplifier off before the process exits.
+    ///
+    /// Dropping the backend would do this anyway, but doing it explicitly on
+    /// the shutdown path means the line is inactive before anything else is
+    /// torn down, and it is one obvious place to look for "does stopping the
+    /// service turn the amp off". It does not cover SIGKILL or a power cut —
+    /// only the external pull-down does (see `gpio`).
+    pub fn shutdown(&mut self) {
+        if self.machine.state().power.amp {
+            tracing::info!("shutting down: driving the amp trigger off");
+        }
+        if let Err(e) = self.amp.set(false) {
+            tracing::warn!("could not drive the amp off on shutdown: {e}");
+        }
     }
 }
 
