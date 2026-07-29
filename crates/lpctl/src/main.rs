@@ -17,6 +17,9 @@ struct Cli {
     /// The artd socket.
     #[arg(long, default_value = lpframe_proto::DEFAULT_SOCKET)]
     socket: PathBuf,
+    /// Writable overrides, whose directory also holds the web password file.
+    #[arg(long, default_value = lpframe_config::DEFAULT_LOCAL_PATH)]
+    config_local: PathBuf,
     #[command(subcommand)]
     command: Command,
 }
@@ -40,11 +43,45 @@ enum Command {
     Display { value: String },
     /// Display an image immediately (artd must be running with --debug).
     Inject { path: PathBuf },
+    /// Reprint the generated web interface password.
+    WebPassword,
+}
+
+/// The one place on the device the web password exists in plaintext.
+///
+/// Only the Argon2id hash is in the configuration, so this file is the only
+/// way to recover a password nobody wrote down. Losing it means deleting
+/// `web.password_hash` from the local override and restarting `artd`, which
+/// generates a new one.
+const PASSWORD_FILE: &str = "web-password.txt";
+
+fn print_web_password(config_local: &std::path::Path) -> Result<()> {
+    let path = config_local
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join(PASSWORD_FILE);
+    let text = std::fs::read_to_string(&path).with_context(|| {
+        format!(
+            "reading {}. It exists only once authentication has generated a password; \
+             if artd could not write it, the password is in the startup log instead.",
+            path.display()
+        )
+    })?;
+    println!("{}", text.trim_end());
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Answered from the filesystem, before anything tries to reach a daemon:
+    // needing the password most likely means the web interface is the thing
+    // that is not working.
+    if matches!(cli.command, Command::WebPassword) {
+        return print_web_password(&cli.config_local);
+    }
+
     let stream = UnixStream::connect(&cli.socket)
         .await
         .with_context(|| format!("connecting to {}", cli.socket.display()))?;
@@ -113,6 +150,8 @@ async fn main() -> Result<()> {
                 .with_context(|| format!("resolving {}", path.display()))?;
             send(&mut write_half, &ClientMessage::InjectArtwork { path }).await?;
         }
+        // Handled before the socket was opened.
+        Command::WebPassword => unreachable!(),
     }
     Ok(())
 }

@@ -25,15 +25,23 @@ lpframe-config = { path = "crates/lpframe-config" }
 lpframe-image = { path = "crates/lpframe-image" }
 
 anyhow = "1"
+# Argon2id at the OWASP minimum parameters, for the web password.
+argon2 = { version = "0.5", features = ["std"] }
 base64 = "0.22"
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
+# Only ever used through `OsRng`: session tokens and the generated password
+# must come from the operating system, never from a PRNG a boot-time seed
+# could make predictable.
+rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
+# Constant-time equality for session tokens.
+subtle = "2"
 thiserror = "2"
 toml = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal", "fs", "process"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 axum = "0.7"
 futures-core = "0.3"

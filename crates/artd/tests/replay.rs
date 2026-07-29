@@ -616,3 +616,92 @@ fn the_amp_backend_is_driven_off_on_shutdown() {
         "shutdown left the amplifier powered"
     );
 }
+
+// --- manual overrides and live reload (DESIGN §7.3) ----------------------
+
+#[test]
+fn a_manual_amp_override_holds_until_the_next_session() {
+    // What this is for: checking the relay is wired the right way round
+    // without having to start playing something.
+    let mut m = machine();
+    assert!(!m.state().power.amp);
+
+    let out = m.override_amp(true, 1_000);
+    assert!(out.changed);
+    assert!(m.state().power.amp);
+
+    // Ticks must not undo it, however many timers run.
+    m.apply(Input::Tick, 60_000);
+    m.apply(Input::Tick, 900_000);
+    assert!(m.state().power.amp, "a tick retired the override");
+
+    // A real session takes the decision back.
+    meta(&mut m, MetaEvent::ActiveBegin, 1_000_000);
+    meta(&mut m, MetaEvent::ActiveEnd, 1_001_000);
+    m.apply(Input::Tick, 1_001_000 + 600_000);
+    assert!(!m.state().power.amp);
+}
+
+#[test]
+fn a_manual_display_wake_still_blanks_after_the_usual_delay() {
+    let mut m = machine();
+    meta(&mut m, MetaEvent::ActiveBegin, 0);
+    meta(&mut m, MetaEvent::ActiveEnd, 1_000);
+    m.apply(Input::Tick, 1_000 + 300_000);
+    assert_eq!(m.state().power.display, DisplayPower::Off);
+
+    let woken_at = 1_000_000;
+    m.override_display(DisplayPower::On, woken_at);
+    assert_eq!(m.state().power.display, DisplayPower::On);
+
+    m.apply(Input::Tick, woken_at + 299_000);
+    assert_eq!(m.state().power.display, DisplayPower::On, "blanked early");
+
+    m.apply(Input::Tick, woken_at + 300_000);
+    assert_eq!(
+        m.state().power.display,
+        DisplayPower::Off,
+        "the wake outlived its blank timer"
+    );
+}
+
+#[test]
+fn a_reloaded_blank_delay_is_measured_from_when_the_device_went_idle() {
+    // Shortening the delay from the settings page must not make the user wait
+    // out the old one, and must not blank retroactively either.
+    let mut m = machine();
+    meta(&mut m, MetaEvent::ActiveBegin, 0);
+    meta(&mut m, MetaEvent::ActiveEnd, 10_000);
+    assert_eq!(m.state().power.display, DisplayPower::On);
+
+    let mut cfg = m.config().clone();
+    cfg.power.display.blank_after = Dur::from_secs(60);
+    m.set_config(cfg, 20_000);
+    assert_eq!(m.state().power.display, DisplayPower::On, "blanked at once");
+
+    m.apply(Input::Tick, 69_000);
+    assert_eq!(m.state().power.display, DisplayPower::On);
+    m.apply(Input::Tick, 70_000);
+    assert_eq!(m.state().power.display, DisplayPower::Off);
+}
+
+#[test]
+fn a_reloaded_timeout_takes_effect_without_a_restart() {
+    let mut m = machine();
+    meta(&mut m, MetaEvent::ActiveBegin, 0);
+    meta(&mut m, MetaEvent::PlayBegin, 100);
+    meta(&mut m, MetaEvent::FirstFrame, 200);
+    assert_eq!(m.state().playback, Playback::Playing);
+
+    let mut cfg = m.config().clone();
+    cfg.timeouts.stall = Dur::from_secs(2);
+    cfg.timeouts.session = Dur::from_secs(4);
+    m.set_config(cfg, 300);
+
+    m.apply(Input::Tick, 2_500);
+    assert_eq!(
+        m.state().playback,
+        Playback::Paused,
+        "the old fifteen-second stall timeout is still in force"
+    );
+}

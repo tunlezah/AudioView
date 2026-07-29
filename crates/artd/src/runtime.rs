@@ -141,7 +141,12 @@ impl Core {
         let now = self.clock.now_ms();
         let label = input.label();
         let outcome = self.machine.apply(input, now);
+        self.perform(&label, outcome);
+        self.consider_enrichment();
+    }
 
+    /// Execute one outcome: its effects, its notes, and the publication.
+    fn perform(&mut self, label: &str, outcome: crate::machine::Outcome) {
         let mut artwork_changed = false;
         for effect in &outcome.effects {
             match effect {
@@ -180,15 +185,13 @@ impl Core {
 
         for note in &outcome.notes {
             tracing::info!("{note}");
-            self.hub.push_note(&label, note.clone());
+            self.hub.push_note(label, note.clone());
         }
 
         if outcome.changed || artwork_changed {
             self.hub.set_counters(self.machine.counters());
             self.hub.publish(self.machine.state().clone());
         }
-
-        self.consider_enrichment();
     }
 
     /// Offer the current track to the enrichment pipeline.
@@ -287,16 +290,32 @@ impl Core {
     }
 
     pub fn handle_command(&mut self, cmd: Command) {
+        let now = self.clock.now_ms();
         match cmd {
             Command::SetDisplay(value) => {
                 tracing::info!("manual display override: {}", value.as_str());
-                // Overrides land with the settings UI (milestone 7); for now
-                // this is visible in the log rather than silently ignored.
+                let outcome = self.machine.override_display(value, now);
+                self.perform("set_display", outcome);
+            }
+            Command::SetAmp(on) => {
+                tracing::info!("manual amp override: {}", if on { "on" } else { "off" });
+                let outcome = self.machine.override_amp(on, now);
+                self.perform("set_amp", outcome);
             }
             Command::InjectArtwork(path) => match std::fs::read(&path) {
                 Ok(bytes) => self.handle(Input::Meta(spmeta::MetaEvent::Picture(bytes))),
                 Err(e) => tracing::warn!("could not read {}: {e}", path.display()),
             },
+            Command::Reload(cfg) => {
+                // Only what the state machine re-reads on every evaluation
+                // changes here. The enrichment pipeline holds an open cache
+                // and a sweeper task, and the renderer reads its own copy of
+                // the file, so both of those need their restart — which is
+                // what the settings page's tiers are telling the user.
+                let outcome = self.machine.set_config(*cfg, now);
+                self.perform("reload", outcome);
+                tracing::info!("configuration reloaded");
+            }
         }
     }
 

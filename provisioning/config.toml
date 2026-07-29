@@ -79,10 +79,21 @@ art_dir = "/run/lpframe/art"
 art_retain = 4
 
 [web]
+# Plain HTTP on the local network. This protects against other people and
+# devices on your network casually reaching the page; it does NOT protect
+# against anyone who can capture traffic on it, because the password crosses
+# in the clear. For that, bind to 127.0.0.1 and use an SSH tunnel, or front
+# this with a TLS-terminating reverse proxy. Do not port-forward it.
 enabled = true
-bind = "127.0.0.1:8730"                  # LAN binding unlocks with auth (milestone 7)
-auth = true                              # password generated at install
-mdns = true                              # advertise http://lpframe.local:8730
+bind = "0.0.0.0:8730"                    # "127.0.0.1:8730" for this device only
+auth = true                              # password generated on first start
+# password_hash is written here's sibling, config.local.toml, on first start.
+# Only the Argon2id hash is stored; the plaintext goes to
+# /var/lib/lpframe/web-password.txt (0600) and the startup log, once.
+mdns = true                              # adds an _http._tcp record via Avahi
+# Permits a non-loopback bind with auth = false. Only for a device behind
+# something else that authenticates. artd warns loudly at every startup.
+insecure_no_auth = false
 
 [logging]
 level = "info"

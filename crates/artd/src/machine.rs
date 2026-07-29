@@ -131,6 +131,15 @@ pub struct Machine {
     amp_off_at_ms: Option<u64>,
     display_ambient_at_ms: Option<u64>,
     display_off_at_ms: Option<u64>,
+
+    /// A manual amp state from `lpctl` or the web interface, held until the
+    /// next session transition. Deliberately not persisted: it exists to test
+    /// wiring, and an override that outlived a reboot would be a device whose
+    /// amplifier never comes on again for reasons nobody remembers.
+    amp_override: Option<bool>,
+    /// The same for the panel, additionally retired by the idle timers so a
+    /// manual wake still blanks after the usual delay.
+    display_override: Option<DisplayPower>,
 }
 
 impl Machine {
@@ -146,6 +155,8 @@ impl Machine {
             amp_off_at_ms: None,
             display_ambient_at_ms: None,
             display_off_at_ms: None,
+            amp_override: None,
+            display_override: None,
         };
         // Boot state is idle with everything off; no delay applies because we
         // were never on.
@@ -166,6 +177,65 @@ impl Machine {
 
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    /// Adopt a new configuration without restarting.
+    ///
+    /// Only the settings this machine reads on every evaluation change
+    /// behaviour here — the timeouts and the power policy. Everything the
+    /// rest of the daemon opened at startup, and everything the renderer
+    /// reads from its own copy of the file, needs the corresponding restart;
+    /// the settings page says which is which (DESIGN §7.3).
+    ///
+    /// The idle timers are re-armed from `now_ms` because they were computed
+    /// against the old delays: shortening `blank_after` from an hour to a
+    /// minute should blank a minute from now, not an hour from when the
+    /// device went idle.
+    pub fn set_config(&mut self, cfg: Config, now_ms: u64) -> Outcome {
+        self.cfg = cfg;
+        if !self.state.playback.is_session() {
+            let since_idle = self.idle_since_ms.unwrap_or(now_ms);
+            let d = &self.cfg.power.display;
+            self.amp_off_at_ms = self
+                .amp_off_at_ms
+                .map(|_| since_idle + self.cfg.power.amp.off_delay.as_millis());
+            self.display_ambient_at_ms = d.ambient_after.as_millis().map(|ms| since_idle + ms);
+            self.display_off_at_ms = Some(since_idle + d.blank_after.as_millis());
+        }
+        let mut out = Outcome::default();
+        let before = self.state.clone();
+        self.apply_power(now_ms, &mut out);
+        out.changed = self.state != before;
+        out
+    }
+
+    /// Force the amplifier trigger on or off.
+    ///
+    /// Held until the next session transition, which is what makes this
+    /// usable for the thing it is for: checking that the relay is wired the
+    /// right way round without having to start playing something.
+    pub fn override_amp(&mut self, on: bool, now_ms: u64) -> Outcome {
+        self.amp_override = Some(on);
+        let mut out = Outcome::default();
+        let before = self.state.clone();
+        self.apply_power(now_ms, &mut out);
+        out.changed = self.state != before;
+        out
+    }
+
+    /// Force a display power state, re-arming the idle timers from now.
+    pub fn override_display(&mut self, value: DisplayPower, now_ms: u64) -> Outcome {
+        self.display_override = Some(value);
+        if !self.state.playback.is_session() {
+            let d = &self.cfg.power.display;
+            self.display_ambient_at_ms = d.ambient_after.as_millis().map(|ms| now_ms + ms);
+            self.display_off_at_ms = Some(now_ms + d.blank_after.as_millis());
+        }
+        let mut out = Outcome::default();
+        let before = self.state.clone();
+        self.apply_power(now_ms, &mut out);
+        out.changed = self.state != before;
+        out
     }
 
     /// Record artwork the runtime has stored. Returns true if this is a new
@@ -440,6 +510,10 @@ impl Machine {
         if !self.state.playback.is_session() {
             self.counters.sessions += 1;
             self.idle_since_ms = None;
+            // Somebody has started playing; whatever was forced by hand
+            // before that is no longer what anyone wants.
+            self.amp_override = None;
+            self.display_override = None;
             // Leaving idle cancels every pending power-down.
             self.amp_off_at_ms = None;
             self.display_ambient_at_ms = None;
@@ -460,6 +534,8 @@ impl Machine {
         self.pending = None;
         self.picture_open = false;
         self.idle_since_ms = Some(now_ms);
+        self.amp_override = None;
+        self.display_override = None;
 
         let d = &self.cfg.power.display;
         self.amp_off_at_ms = Some(now_ms + self.cfg.power.amp.off_delay.as_millis());
@@ -505,6 +581,17 @@ impl Machine {
             // Idle: hold until the off delay expires.
             self.amp_off_at_ms.is_some_and(|t| now_ms < t) && self.state.power.amp
         };
+        let want_amp = self.amp_override.unwrap_or(want_amp);
+
+        // An idle timer coming due overtakes a manual override, so waking the
+        // panel from the settings page still blanks after the usual delay
+        // rather than leaving it lit until someone plays something.
+        if self.display_override.is_some()
+            && (self.display_off_at_ms.is_some_and(|t| now_ms >= t)
+                || self.display_ambient_at_ms.is_some_and(|t| now_ms >= t))
+        {
+            self.display_override = None;
+        }
 
         let want_display = if in_session {
             DisplayPower::On
@@ -516,6 +603,7 @@ impl Machine {
             // Idle but still inside the blank delay: hold what we have.
             self.state.power.display
         };
+        let want_display = self.display_override.unwrap_or(want_display);
 
         if want_amp != self.state.power.amp {
             self.state.power.amp = want_amp;

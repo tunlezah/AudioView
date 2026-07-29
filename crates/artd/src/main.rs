@@ -85,13 +85,24 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    // Fail before opening anything if the web interface is misconfigured,
-    // rather than bringing a device up with half its surface live.
-    let web_addr = if cfg.web.enabled {
-        Some(artd::web::check_bind(&cfg.web.bind, false)?)
+    // Authentication is resolved before the bind is judged, so that "auth is
+    // on" and "there is a hash to check against" are the same statement by
+    // the time `check_bind` looks. Both happen before anything is opened:
+    // bringing a device up with half its surface live is the failure this
+    // ordering exists to avoid.
+    let auth = if cfg.web.enabled {
+        artd::web::prepare_auth(&mut cfg, &cli.config, &cli.config_local)?
     } else {
         None
     };
+    let web_bind = if cfg.web.enabled {
+        Some(artd::web::check_bind(&cfg.web)?)
+    } else {
+        None
+    };
+    if let Some(warning) = web_bind.as_ref().and_then(|b| b.warning.as_deref()) {
+        tracing::warn!("{warning}");
+    }
 
     let hub = Hub::new(cfg.logging.event_buffer);
     let clock = Arc::new(MonotonicClock::default());
@@ -139,10 +150,20 @@ async fn main() -> Result<()> {
         });
     }
 
-    if let Some(addr) = web_addr {
-        let hub = hub.clone();
+    // Held for the process's lifetime: dropping it withdraws the record.
+    let mut _advertisement = None;
+    if let Some(bind) = web_bind {
+        let settings = artd::web::settings::Settings::new(
+            cli.config.clone(),
+            cli.config_local.clone(),
+            cmd_tx.clone(),
+        );
+        let app = artd::web::App::new(hub.clone(), auth, settings);
+        if cfg.web.mdns {
+            _advertisement = artd::web::mdns::advertise(&cfg.device.name, bind.addr);
+        }
         tokio::spawn(async move {
-            if let Err(e) = artd::web::serve(hub, addr).await {
+            if let Err(e) = artd::web::serve(app, bind.addr).await {
                 tracing::error!("web interface stopped: {e}");
             }
         });

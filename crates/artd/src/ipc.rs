@@ -10,10 +10,16 @@ use tokio::net::{UnixListener, UnixStream};
 use crate::hub::Hub;
 
 /// Requests from clients that the core has to act on.
+///
+/// Also the channel the web interface uses: a settings change that can be
+/// applied without a restart arrives here as [`Command::Reload`], so there is
+/// one place where the running configuration is replaced rather than two.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     SetDisplay(lpframe_proto::DisplayPower),
+    SetAmp(bool),
     InjectArtwork(PathBuf),
+    Reload(Box<lpframe_config::Config>),
 }
 
 pub struct Server {

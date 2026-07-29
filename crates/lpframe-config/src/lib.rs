@@ -13,13 +13,15 @@
 #![forbid(unsafe_code)]
 
 pub mod duration;
+pub mod write;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 pub use duration::{Dur, MaybeDuration};
+pub use write::{edit_overrides, read_local, reset_overrides, set_overrides, write_atomic};
 
 pub const DEFAULT_BASE_PATH: &str = "/etc/lpframe/config.toml";
 pub const DEFAULT_LOCAL_PATH: &str = "/var/lib/lpframe/config.local.toml";
@@ -40,6 +42,14 @@ pub enum ConfigError {
     },
     #[error("configuration is invalid: {0}")]
     Invalid(String),
+    #[error("writing {path}: {source}")]
+    Write {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("{0}")]
+    BadKey(String),
 }
 
 // --- schema ---------------------------------------------------------------
@@ -220,7 +230,20 @@ pub struct Web {
     pub enabled: bool,
     pub bind: String,
     pub auth: bool,
+    /// Argon2id PHC string for the web password, generated on first run and
+    /// written to the local override. The plaintext is never stored here, is
+    /// never logged after the one line at generation, and never leaves the
+    /// daemon in an API response.
+    pub password_hash: String,
+    /// Advertise `_http._tcp` over Avahi. Hostname resolution is Avahi's
+    /// doing already, so this only adds the service record (DESIGN §7.3).
     pub mdns: bool,
+    /// Bind beyond loopback with `auth = false`. Off, and staying off unless
+    /// somebody types it: the setting it disables is the only thing standing
+    /// between a stranger on the network and the listening history.
+    ///
+    /// The honest use is a reverse proxy that authenticates in front of us.
+    pub insecure_no_auth: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -407,9 +430,15 @@ impl Default for Web {
     fn default() -> Self {
         Web {
             enabled: true,
+            // LAN by default, because the interface is the only way to
+            // configure a device with no buttons and no keyboard. Safe only
+            // because `auth` below defaults on and `validate` refuses the
+            // combination of a non-loopback bind and no authentication.
             bind: "0.0.0.0:8730".into(),
             auth: true,
+            password_hash: String::new(),
             mdns: true,
+            insecure_no_auth: false,
         }
     }
 }
@@ -524,13 +553,66 @@ impl Config {
                 return bad("enrichment.contact must be set when musicbrainz is enabled".into());
             }
         }
-        if self.web.enabled && self.web.bind.parse::<std::net::SocketAddr>().is_err() {
-            return bad(format!(
-                "web.bind {:?} is not a valid address:port",
-                self.web.bind
-            ));
+        if self.web.enabled {
+            let Ok(addr) = self.web.bind.parse::<std::net::SocketAddr>() else {
+                return bad(format!(
+                    "web.bind {:?} is not a valid address:port",
+                    self.web.bind
+                ));
+            };
+            // Checked here rather than only at startup so the settings page
+            // cannot write the combination either: turning auth off while
+            // bound to the LAN is a change whose consequence only shows up at
+            // the next reboot, by which point the device is unreachable.
+            if !addr.ip().is_loopback() && !self.web.auth && !self.web.insecure_no_auth {
+                return bad(format!(
+                    "web.bind is {addr} with web.auth = false, which would serve the \
+                     listening history and every setting to anything on the network. \
+                     Set web.auth = true, or web.bind = \"127.0.0.1:{}\", or — if \
+                     something in front of this authenticates for you — \
+                     web.insecure_no_auth = true.",
+                    addr.port()
+                ));
+            }
         }
         Ok(())
+    }
+}
+
+/// Every setting flattened to its dotted path, e.g. `render.ambient`.
+///
+/// The settings page is generated from this rather than from a hand-written
+/// list, so a new key in the schema appears in the interface without anyone
+/// remembering to add it.
+pub fn flatten(config: &Config) -> BTreeMap<String, toml::Value> {
+    let value = toml::Value::try_from(config).expect("the config schema always serialises");
+    let mut out = BTreeMap::new();
+    collect_leaves(&value, String::new(), &mut out);
+    out
+}
+
+/// The default value of every setting, keyed by dotted path.
+pub fn defaults() -> BTreeMap<String, toml::Value> {
+    flatten(&Config::default())
+}
+
+fn collect_leaves(v: &toml::Value, prefix: String, out: &mut BTreeMap<String, toml::Value>) {
+    match v {
+        toml::Value::Table(t) => {
+            for (k, child) in t {
+                let path = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                collect_leaves(child, path, out);
+            }
+        }
+        other => {
+            if !prefix.is_empty() {
+                out.insert(prefix, other.clone());
+            }
+        }
     }
 }
 
