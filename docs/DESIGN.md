@@ -674,11 +674,12 @@ socket = "/run/lpframe/artd.sock"
 
 [web]
 enabled = true
-# Until authentication lands (milestone 7) artd refuses any non-loopback
-# bind, so this default is 127.0.0.1 today and becomes 0.0.0.0 with auth.
-bind = "127.0.0.1:8730"
-auth = true                    # password generated at install
-mdns = true                    # advertise http://lpframe.local:8730
+bind = "0.0.0.0:8730"
+auth = true                    # password generated on first start
+# password_hash is written to config.local.toml on first start. Argon2id
+# only; the plaintext goes to /var/lib/lpframe/web-password.txt (0600).
+mdns = true                    # adds an _http._tcp record via Avahi
+insecure_no_auth = false       # permits a LAN bind with auth off
 
 [logging]
 level = "info"
@@ -699,34 +700,45 @@ This was originally scoped as a loopback debug page. It is now a real component:
 **Transport.** The state snapshot that already goes to `lprender` over the Unix socket is re-broadcast to browsers as Server-Sent Events on `/api/events`. Same payload, same `seq`, one broadcaster. SSE rather than WebSocket because reconnection is built into `EventSource` and we only need one direction.
 
 ```
+GET   /api/session               whether a login is needed, and whether we have one
+POST  /api/login                 {"password": "..."} → session cookie
+POST  /api/logout                drops the session server-side
 GET   /api/state                 current snapshot
 GET   /api/events                SSE stream of snapshots
 GET   /api/config                merged config + which keys are overridden + defaults
 PATCH /api/config                sparse update; validated, then written to config.local.toml
 POST  /api/config/reset          {"keys": ["render.ambient"]} → drop the override
-GET   /api/artwork/current       512px JPEG thumbnail (never the 3000px original)
-POST  /api/actions/<action>      amp_on | amp_off | display_wake | cache_clear | reprobe_display
+POST  /api/config/confirm        {"id": 3} → keep a display change the countdown would undo
+GET   /api/artwork/current       the current image, from the published path only
+POST  /api/actions/<action>      amp_on | amp_off | display_wake | display_sleep
+                                 | restart_renderer (= reprobe_display) | restart_daemon
 ```
 
-**Applying changes.** Writes go to `config.local.toml` atomically (temp file, `fsync`, `rename`) and only after validating the merged result. Settings fall into three tiers, labelled as such in the UI:
+Everything except `/`, `/api/session` and `/api/login` requires a session. `cache_clear` from the original list is **not implemented**: emptying the cache means emptying a SQLite index and the files it points at while the enrichment pipeline holds both open, and doing that from the web layer would leave the two disagreeing. It answers 501 saying so. The sweeper already enforces `cache.max_bytes`.
 
-- **Live** — timings, enrichment, ambient, fit, background, crossfade, amp delays. Applied in-process, no restart.
-- **Needs `lprender` restart** — rotation, mode, connector, card.
-- **Needs `artd` restart** — GPIO chip/line, socket path, web bind.
+**Applying changes.** Writes go to `config.local.toml` atomically (temp file, `fsync`, `rename`, `fsync` the directory) and only after parsing and validating the merged result. The running daemon is told only about a change that reached the disk. Settings fall into three tiers, labelled as such in the UI:
 
-The UI offers a one-click restart for the latter two.
+- **Live** — `timeouts.*`, `power.display.*`, and the `power.amp.*` policy (delays, debounce, trigger event). `artd` re-reads these on every timer evaluation, and the idle timers are re-armed from the moment of the change.
+- **Needs `lprender` restart** — everything under `display.*` and `render.*`.
+- **Needs `artd` restart** — `ipc.*`, `web.*`, `cache.*`, `enrichment.*`, `device.*`, `audio.*`, `logging.*`, and the three amp keys that describe the GPIO line itself.
 
-**Confirm-or-revert on display changes.** Applying rotation or mode starts a 15-second countdown; if you do not click *Keep this*, it reverts. Borrowed from desktop display settings, for the same reason: a wrong mode on a headless appliance with no input device is otherwise a reflash.
+This is narrower than originally planned, and deliberately labelled honestly. The plan had the render settings — ambient, fit, background, crossfade — as live; they are not, because `lprender` loads the configuration once at startup and the snapshot protocol carries no render policy. Enrichment is the same story for a different reason: the pipeline owns an open cache and a sweeper task, and rebuilding it under a running daemon would leave the old one sweeping the same database. Both are one click in the UI, which offers a restart for the two non-live tiers, and says what to run instead when systemd is not managing the device.
+
+**Confirm-or-revert on display changes.** Applying `display.rotation` or `display.mode` starts a 15-second countdown; if you do not click *Keep this*, it reverts. Borrowed from desktop display settings, for the same reason: a wrong mode on a headless appliance with no input device is otherwise a reflash. The countdown lives in the daemon, not the browser, so closing the tab or losing the display does not strand the change. The revert restores the previous *override*, not the default — so undoing a bad rotation returns you to the last one you confirmed. It is a configuration write, so it works with or without systemd; only the renderer restart that makes it visible needs one.
 
 **Auth and threat model.** Default is LAN-bound with a password, because the alternative — an unauthenticated page on the LAN — exposes listening history and lets any device on the network toggle outbound API calls.
 
-- **Until milestone 7, `artd` refuses to bind anywhere but loopback.** Shipping an unauthenticated page on the LAN with `web.auth = true` sitting unimplemented in the config would be worse than shipping no page at all — it would look protected. The default bind is `127.0.0.1:8730` and flips to `0.0.0.0:8730` when auth lands.
-- The installer generates a random passphrase, writes it to `/var/lib/lpframe/web-password.txt` (0600), prints it at the end of the install, and `lpctl web-password` reprints it. Stored as an Argon2id hash in `config.local.toml`.
-- Session cookie, `HttpOnly` + `SameSite=Strict` (which also handles CSRF), 30-day expiry. Login is rate-limited to 5 attempts/minute with constant-time comparison.
+- On first start with `web.auth = true` and no hash, `artd` generates a 100-bit passphrase from the OS entropy source, writes it to `/var/lib/lpframe/web-password.txt` (0600), logs it once at `warn`, and stores only an **Argon2id** hash (m=19456 KiB, t=2, p=1 — the OWASP minimum) in `config.local.toml`. `lpctl web-password` reprints it. The hash is never returned by any endpoint and cannot be set through one.
+- Session cookie `lpframe_session`: 32 bytes of OS entropy, held server-side and compared in constant time, `HttpOnly` + `SameSite=Strict` + `Path=/`, 30-day expiry. **No `Secure` flag** — the device serves plain HTTP, and the browser would drop a `Secure` cookie on every request. Sessions do not survive a restart.
+- CSRF: `SameSite=Strict` plus a required `X-LPFrame-Request` header on every mutating request. A cross-origin form post cannot set a custom header, and anything that could becomes a preflight we never approve.
+- Login is rate-limited to 5 attempts per minute per client address (the TCP peer; `X-Forwarded-For` is deliberately not trusted). A wrong password and an unknown session return the identical 401.
+- `web.auth = false` with a non-loopback bind **refuses to start**, unless `web.insecure_no_auth = true` says so deliberately — for a device behind something else that authenticates. That combination logs a shouting warning at every startup.
 - **Plain HTTP, stated plainly:** this protects against other people and devices casually reaching the page on your network. It does *not* protect against someone who can passively sniff your LAN — the password crosses in the clear. If that is in your threat model, set `web.bind = "127.0.0.1:8730"` and use an SSH tunnel, or front it with a TLS-terminating reverse proxy. We do not ship self-signed TLS; it trains people to click through certificate warnings and buys nothing here.
 - **Do not port-forward this.** The build guide says so in a box. There is no WAN mode, no remote access feature, and no cloud component.
 
-**Implementation.** `axum` inside `artd`. Assets embedded in the binary via `rust-embed` — vanilla JS and one stylesheet, no npm, no build step, and critically no CDN references, since the device is frequently offline and a settings page that needs internet access to render would be useless exactly when you need it. Roughly 30 KB total, dark theme.
+**mDNS.** `web.mdns` spawns `avahi-publish` to add an `_http._tcp` service record, and that is all it does. Avahi is on the device for AirPlay already and publishes the hostname, so `http://lpframe.local:8730` resolves either way; the record only adds discovery. Absent or failing `avahi-publish` is warned about once and otherwise ignored.
+
+**Implementation.** `axum` inside `artd`, one embedded HTML file with inline CSS and vanilla JS — no npm, no build step, and critically no CDN references, since the device is frequently offline and a settings page that needs internet access to render would be useless exactly when you need it. Roughly 25 KB, dark theme. Everything the daemon sends is written with `textContent`, never as markup: track titles come off the AirPlay pipe and the sender chooses them.
 
 ---
 

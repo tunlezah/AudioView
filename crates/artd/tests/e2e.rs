@@ -371,13 +371,22 @@ fn check_config_validates_without_starting_anything() {
     assert!(String::from_utf8_lossy(&out.stdout).contains("valid"));
 }
 
-#[test]
-fn a_non_loopback_web_bind_is_refused_while_auth_is_unimplemented() {
-    let dir = std::env::temp_dir().join(format!("artd-e2e-bind-{}", std::process::id()));
+fn web_scratch(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("artd-e2e-{name}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn a_non_loopback_web_bind_with_auth_off_refuses_to_start() {
+    let dir = web_scratch("bind");
     let config = dir.join("config.toml");
-    std::fs::write(&config, "[web]\nbind = \"0.0.0.0:8730\"\n").unwrap();
+    std::fs::write(
+        &config,
+        "[web]\nbind = \"0.0.0.0:8730\"\nauth = false\n[ipc]\nsocket = \"/nonexistent/no.sock\"\n",
+    )
+    .unwrap();
 
     let out = Command::new(env!("CARGO_BIN_EXE_artd"))
         .arg("--config")
@@ -393,8 +402,101 @@ fn a_non_loopback_web_bind_is_refused_while_auth_is_unimplemented() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("authentication is not implemented"),
+        stderr.contains("web.auth = false") || stderr.contains("web.auth"),
         "unexpected error: {stderr}"
     );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn the_escape_hatch_permits_the_bind_and_says_so_loudly() {
+    let dir = web_scratch("escape");
+    let config = dir.join("config.toml");
+    // Loopback would be permitted regardless; `--check-config` exits before
+    // anything is bound, so this asserts the policy without holding a port.
+    std::fs::write(
+        &config,
+        "[web]\nbind = \"0.0.0.0:8730\"\nauth = false\ninsecure_no_auth = true\n",
+    )
+    .unwrap();
+
+    let out = Command::new(env!("CARGO_BIN_EXE_artd"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--config-local")
+        .arg(dir.join("none.toml"))
+        .arg("--check-config")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "the escape hatch did not permit the bind: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The first-start password: generated, written 0600, hashed into the local
+/// override, never stored in plaintext anywhere but that one file, and
+/// reprintable with `lpctl web-password`.
+#[test]
+fn a_first_start_generates_a_password_and_stores_only_its_hash() {
+    let dir = web_scratch("password");
+    let config = dir.join("config.toml");
+    let local = dir.join("config.local.toml");
+    std::fs::write(
+        &config,
+        format!(
+            // Port 0 so this never collides with anything else on the machine.
+            "[device]\nmetadata_pipe = \"{}\"\n[ipc]\nsocket = \"{}\"\nart_dir = \"{}\"\n\
+             [web]\nbind = \"127.0.0.1:0\"\nauth = true\nmdns = false\n\
+             [enrichment]\nenabled = false\n",
+            dir.join("metadata").display(),
+            dir.join("artd.sock").display(),
+            dir.join("art").display(),
+        ),
+    )
+    .unwrap();
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_artd"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--config-local")
+        .arg(&local)
+        .env("RUST_LOG", "warn")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+
+    let password_file = dir.join("web-password.txt");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline && !local.exists() {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let password = std::fs::read_to_string(&password_file)
+        .expect("no password file")
+        .trim()
+        .to_string();
+    assert_eq!(password.len(), 23, "{password:?}");
+
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(&password_file)
+        .unwrap()
+        .permissions()
+        .mode()
+        & 0o777;
+    assert_eq!(mode, 0o600, "the password file is readable by others");
+
+    let stored = std::fs::read_to_string(&local).unwrap();
+    assert!(stored.contains("$argon2id$"), "{stored}");
+    assert!(
+        !stored.contains(&password),
+        "the plaintext reached the config file"
+    );
+
     let _ = std::fs::remove_dir_all(&dir);
 }

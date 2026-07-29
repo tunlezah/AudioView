@@ -29,8 +29,51 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 | 4 | Integration | done |
 | 5 | Enrichment | done — gate thresholds unvalidated against real cover art |
 | 6 | Power management | done — GPIO line driving unverified on hardware |
-| 7 | Web interface | next |
-| 8 | Provisioning + `docs/BUILD.md` | |
+| 7 | Web interface | done — see the note on live settings below |
+| 8 | Provisioning + `docs/BUILD.md` | next |
+
+## The web interface
+
+`http://lpframe.local:8730` — Now Playing, Settings and Diagnostics, served by
+`artd` itself. It is the only way to configure a running device short of SSH,
+so it is on by default, bound to the LAN by default, and authenticated.
+
+**Password.** On the first start with `web.auth = true`, `artd` generates a
+passphrase, prints it once in the log, writes it to
+`/var/lib/lpframe/web-password.txt` (mode 0600), and stores only an Argon2id
+hash in `config.local.toml`. `lpctl web-password` reprints it. To force a new
+one, delete `web.password_hash` from `/var/lib/lpframe/config.local.toml` and
+restart `artd`.
+
+**What the authentication is for, and what it is not.** It keeps other people
+and other devices on your network out of your listening history and your
+settings. It is **plain HTTP**: the password crosses the network in the clear
+on every login and the session cookie on every request, so it does nothing
+against someone who can capture traffic on your LAN. If that matters, set
+`web.bind = "127.0.0.1:8730"` and use an SSH tunnel, or put a TLS-terminating
+reverse proxy in front. **Do not port-forward it** — there is no WAN mode and
+no cloud component. The full threat model, including what is deliberately not
+defended against, is at the top of `crates/artd/src/web/auth.rs`.
+
+Turning `web.auth` off while bound to anything but loopback makes `artd`
+refuse to start. If something in front of it is doing the authentication, say
+so with `web.insecure_no_auth = true`; the daemon then warns at every startup.
+
+**Settings tiers.** Each setting is labelled with what it needs before it takes
+effect: *live* (timeouts, display blanking, amp delays — applied in-process),
+*needs `lprender` restart* (everything under `display.` and `render.`), or
+*needs `artd` restart* (`ipc.`, `web.`, `cache.`, `enrichment.`, and the GPIO
+line). The page offers one-click restarts for the latter two, and says what to
+run instead when systemd is not managing the device. Note that this is
+narrower than `docs/DESIGN.md` originally planned: the render settings are not
+live, because `lprender` reads the configuration once at startup.
+
+Changing `display.rotation` or `display.mode` starts a 15-second countdown in
+the daemon. Unless you click *Keep this*, the previous value comes back —
+which is what stops a wrong mode on a headless device being a reflash.
+
+`web.mdns` adds an `_http._tcp` service record via `avahi-publish` and nothing
+more. The hostname resolves through Avahi either way.
 
 ## Developing
 
@@ -57,6 +100,7 @@ socket = "/tmp/lp/artd.sock"
 art_dir = "/tmp/lp/art"
 [web]
 bind = "127.0.0.1:8730"
+auth = false          # loopback only, so nothing is exposed by this
 EOF
 
 ./target/debug/artd --config /tmp/lp/config.toml --config-local /tmp/lp/local.toml &
@@ -66,8 +110,11 @@ EOF
 ./target/debug/lpcapture replay fixtures/sessions/album.pipe --to /tmp/lp/metadata
 ```
 
-Then open <http://127.0.0.1:8730/> for Now Playing and diagnostics. On a real
-device, point `metadata_pipe` at shairport-sync's pipe instead of replaying.
+Then open <http://127.0.0.1:8730/>. The `[web] bind` above is loopback, so no
+password is needed to reach it; add `auth = true` to exercise the login, and
+the generated password appears in artd's log and in `/tmp/lp/web-password.txt`.
+On a real device, point `metadata_pipe` at shairport-sync's pipe instead of
+replaying.
 
 ### Running the renderer without a Pi
 
@@ -115,6 +162,7 @@ socket = "/tmp/lp/artd.sock"
 art_dir = "/tmp/lp/art"
 [web]
 bind = "127.0.0.1:8730"
+auth = false          # loopback only, so nothing is exposed by this
 EOF
 
 ./target/debug/artd --config /tmp/lp/config.toml --config-local /nonexistent &

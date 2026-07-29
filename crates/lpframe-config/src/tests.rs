@@ -177,6 +177,185 @@ fn byte_sizes_parse_and_render() {
 }
 
 #[test]
+fn validation_refuses_a_lan_bind_with_authentication_off() {
+    let mut c = Config::default();
+    c.web.bind = "0.0.0.0:8730".into();
+    c.web.auth = false;
+    let err = c.validate().unwrap_err().to_string();
+    assert!(err.contains("web.auth = false"), "{err}");
+
+    // Loopback is fine unauthenticated: reaching it already means being on
+    // the device.
+    c.web.bind = "127.0.0.1:8730".into();
+    c.validate().unwrap();
+
+    // ...and so is the LAN, once the escape hatch is deliberately set.
+    c.web.bind = "0.0.0.0:8730".into();
+    c.web.insecure_no_auth = true;
+    c.validate().unwrap();
+}
+
+#[test]
+fn every_schema_key_has_a_dotted_path_and_a_default() {
+    let d = defaults();
+    for key in ["render.ambient", "web.bind", "power.amp.gpio_line"] {
+        assert!(d.contains_key(key), "{key} missing from {:?}", d.keys());
+    }
+    // The hash is a setting like any other as far as the schema goes; the
+    // web layer is what refuses to hand it out.
+    assert!(d.contains_key("web.password_hash"));
+}
+
+// --- the write path -------------------------------------------------------
+
+fn layered(name: &str) -> (PathBuf, PathBuf) {
+    let d = tmpdir(name);
+    (d.join("config.toml"), d.join("config.local.toml"))
+}
+
+fn edits(pairs: &[(&str, toml::Value)]) -> BTreeMap<String, toml::Value> {
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect()
+}
+
+#[test]
+fn a_set_value_survives_a_reload() {
+    let (base, local) = layered("set");
+    std::fs::write(&base, "[render]\nambient = false\n").unwrap();
+
+    let written = set_overrides(&base, &local, &edits(&[("render.ambient", true.into())])).unwrap();
+    assert!(written.config.render.ambient);
+
+    let reloaded = Config::load(&base, &local).unwrap();
+    assert!(reloaded.config.render.ambient);
+    assert!(reloaded.overridden.contains("render.ambient"));
+}
+
+#[test]
+fn a_reset_key_falls_back_to_the_base_value() {
+    let (base, local) = layered("reset");
+    std::fs::write(&base, "[render]\nambient = false\ncrossfade = \"600ms\"\n").unwrap();
+    set_overrides(
+        &base,
+        &local,
+        &edits(&[
+            ("render.ambient", true.into()),
+            ("render.crossfade", "2s".into()),
+        ]),
+    )
+    .unwrap();
+
+    reset_overrides(&base, &local, &["render.ambient".to_string()]).unwrap();
+
+    let reloaded = Config::load(&base, &local).unwrap();
+    assert!(!reloaded.config.render.ambient, "back to the base value");
+    // The sibling override is untouched.
+    assert_eq!(reloaded.config.render.crossfade, Dur::from_secs(2));
+    assert_eq!(
+        reloaded.overridden.iter().cloned().collect::<Vec<_>>(),
+        vec!["render.crossfade".to_string()]
+    );
+}
+
+#[test]
+fn resetting_the_last_key_in_a_table_prunes_the_table() {
+    let (base, local) = layered("prune");
+    set_overrides(
+        &base,
+        &local,
+        &edits(&[("power.amp.off_delay", "20m".into())]),
+    )
+    .unwrap();
+    reset_overrides(&base, &local, &["power.amp.off_delay".to_string()]).unwrap();
+
+    let text = std::fs::read_to_string(&local).unwrap();
+    assert!(!text.contains("power"), "empty tables left behind:\n{text}");
+    assert!(read_local(&local).unwrap().is_empty());
+}
+
+#[test]
+fn an_invalid_change_leaves_the_file_byte_identical() {
+    let (base, local) = layered("invalid");
+    set_overrides(&base, &local, &edits(&[("timeouts.stall", "10s".into())])).unwrap();
+    let before = std::fs::read(&local).unwrap();
+
+    // stall must stay shorter than session, or the paused state is
+    // unreachable and the device appears to jump straight to dark.
+    let err = set_overrides(&base, &local, &edits(&[("timeouts.stall", "90s".into())]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("must be shorter"), "{err}");
+
+    assert_eq!(std::fs::read(&local).unwrap(), before);
+    assert_eq!(
+        Config::load(&base, &local).unwrap().config.timeouts.stall,
+        Dur::from_secs(10)
+    );
+}
+
+#[test]
+fn a_value_of_the_wrong_type_is_refused_without_writing() {
+    let (base, local) = layered("wrong-type");
+    let err = set_overrides(
+        &base,
+        &local,
+        &edits(&[("render.ambient", "yes please".into())]),
+    )
+    .unwrap_err();
+    assert!(matches!(err, ConfigError::Parse { .. }), "{err}");
+    assert!(!local.exists());
+}
+
+#[test]
+fn an_unknown_key_is_refused_by_name() {
+    let (base, local) = layered("unknown-key");
+    let err = set_overrides(&base, &local, &edits(&[("render.ambiant", true.into())]))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ambiant"), "{err}");
+    assert!(!local.exists());
+}
+
+#[test]
+fn edits_can_set_and_drop_keys_in_one_commit() {
+    // This is the shape confirm-or-revert needs: some of the keys it puts
+    // back were overridden before, and some were not.
+    let (base, local) = layered("mixed");
+    set_overrides(&base, &local, &edits(&[("display.rotation", 90.into())])).unwrap();
+
+    let mut mixed: BTreeMap<String, Option<toml::Value>> = BTreeMap::new();
+    mixed.insert("display.rotation".into(), None);
+    mixed.insert("display.mode".into(), Some("1920x1920@60".into()));
+    let loaded = edit_overrides(&base, &local, &mixed).unwrap();
+
+    assert_eq!(loaded.config.display.rotation, 0);
+    assert_eq!(loaded.config.display.mode, "1920x1920@60");
+}
+
+#[test]
+fn the_override_file_is_not_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+    let (base, local) = layered("mode");
+    set_overrides(&base, &local, &edits(&[("render.ambient", true.into())])).unwrap();
+    let mode = std::fs::metadata(&local).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640, "it holds web.password_hash");
+}
+
+#[test]
+fn no_temporary_files_are_left_behind() {
+    let (base, local) = layered("tmp");
+    set_overrides(&base, &local, &edits(&[("render.ambient", true.into())])).unwrap();
+    let leftovers: Vec<_> = std::fs::read_dir(local.parent().unwrap())
+        .unwrap()
+        .filter_map(|e| e.ok().map(|e| e.file_name().to_string_lossy().to_string()))
+        .filter(|n| n.contains(".tmp."))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}
+
+#[test]
 fn the_shipped_example_config_matches_the_schema() {
     // docs and code drifting apart is the usual failure here.
     let example = include_str!("../../../provisioning/config.toml");

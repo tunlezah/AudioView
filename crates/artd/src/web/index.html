@@ -5,7 +5,8 @@
 <style>
   :root {
     --bg: #0d0e10; --fg: #e8e8ea; --dim: #8a8d94; --line: #24262b;
-    --accent: #7aa2f7; --ok: #7dcfa0; --warn: #e0af68;
+    --accent: #7aa2f7; --ok: #7dcfa0; --warn: #e0af68; --bad: #f7768e;
+    --panel: #14161a;
   }
   * { box-sizing: border-box; }
   body {
@@ -13,14 +14,22 @@
     font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   header {
-    display: flex; align-items: baseline; gap: 1rem;
+    display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
     padding: 1rem 1.25rem; border-bottom: 1px solid var(--line);
   }
   h1 { font-size: 1rem; font-weight: 600; margin: 0; letter-spacing: .02em; }
+  nav { display: flex; gap: .25rem; }
+  nav button {
+    background: none; border: 1px solid transparent; color: var(--dim);
+    font: inherit; font-size: .85rem; padding: .2rem .7rem; border-radius: 99px;
+    cursor: pointer;
+  }
+  nav button[aria-current="page"] { color: var(--fg); border-color: var(--line); background: var(--panel); }
   #conn { margin-left: auto; font-size: .8rem; color: var(--dim); }
   #conn.live::before { content: "● "; color: var(--ok); }
   #conn.dead::before { content: "● "; color: var(--warn); }
-  main { max-width: 60rem; margin: 0 auto; padding: 1.25rem; }
+  main { max-width: 62rem; margin: 0 auto; padding: 1.25rem; }
+  [hidden] { display: none !important; }
   .now { display: grid; grid-template-columns: minmax(0, 240px) 1fr; gap: 1.5rem; align-items: start; }
   @media (max-width: 640px) { .now { grid-template-columns: 1fr; } }
   #art {
@@ -28,18 +37,19 @@
     object-fit: cover; display: block; border: 1px solid var(--line);
   }
   #title { font-size: 1.5rem; font-weight: 600; margin: 0 0 .25rem; }
-  #artist { color: var(--dim); margin: 0 0 .1rem; }
-  #album { color: var(--dim); margin: 0 0 1rem; }
+  #artist, #album { color: var(--dim); margin: 0 0 .1rem; }
+  #album { margin-bottom: 1rem; }
   .pills { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: 1rem; }
   .pill {
     font-size: .75rem; padding: .15rem .5rem; border-radius: 99px;
-    border: 1px solid var(--line); color: var(--dim);
+    border: 1px solid var(--line); color: var(--dim); white-space: nowrap;
   }
   .pill.on { color: var(--accent); border-color: var(--accent); }
   progress { width: 100%; height: 4px; accent-color: var(--accent); }
   .times { display: flex; justify-content: space-between; font-size: .8rem; color: var(--dim); }
   h2 { font-size: .8rem; text-transform: uppercase; letter-spacing: .08em;
        color: var(--dim); margin: 2rem 0 .75rem; font-weight: 600; }
+  h2:first-child { margin-top: 0; }
   .counters { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: .5rem; }
   .counter { border: 1px solid var(--line); border-radius: 6px; padding: .5rem .7rem; }
   .counter b { display: block; font-size: 1.25rem; font-weight: 600; }
@@ -49,49 +59,239 @@
   td.ts { color: var(--dim); white-space: nowrap; width: 1%; font-variant-numeric: tabular-nums; }
   td.in { color: var(--accent); white-space: nowrap; width: 1%; }
   footer { color: var(--dim); font-size: .78rem; padding: 1rem 1.25rem; border-top: 1px solid var(--line); }
+  footer a { color: var(--dim); }
+
+  button.action, input, select {
+    background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 5px; font: inherit; font-size: .85rem; padding: .3rem .5rem;
+  }
+  button.action { cursor: pointer; }
+  button.action:hover { border-color: var(--accent); }
+  button.action.warn { color: var(--warn); }
+  input[type=checkbox] { width: 1.1rem; height: 1.1rem; accent-color: var(--accent); padding: 0; }
+
+  .setting {
+    display: grid; grid-template-columns: 1fr minmax(0, 16rem) auto;
+    gap: .5rem 1rem; align-items: center;
+    padding: .5rem .25rem; border-bottom: 1px solid var(--line);
+  }
+  @media (max-width: 640px) { .setting { grid-template-columns: 1fr; } }
+  .setting .name { font-size: .9rem; font-variant-numeric: tabular-nums; }
+  .setting .name code { font-size: .85em; color: var(--dim); }
+  .setting .hint { display: block; font-size: .75rem; color: var(--dim); }
+  .setting .marks { display: flex; gap: .4rem; align-items: center; justify-content: flex-end; }
+  .setting.changed { background: #16181d; }
+  .tier { font-size: .7rem; padding: .1rem .45rem; border-radius: 99px; border: 1px solid var(--line); color: var(--dim); }
+  .tier.renderer { color: var(--warn); border-color: #3a3324; }
+  .tier.daemon { color: var(--bad); border-color: #3d2830; }
+  .over { font-size: .7rem; color: var(--accent); }
+
+  #login { max-width: 22rem; margin: 4rem auto; }
+  #login p { color: var(--dim); font-size: .85rem; }
+  #login input { width: 100%; margin: .5rem 0; }
+  #banner {
+    position: sticky; top: 0; z-index: 2; padding: .6rem 1.25rem;
+    background: #2a2118; border-bottom: 1px solid #3a3324; color: var(--warn);
+    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
+  }
+  #banner b { color: var(--fg); }
+  #toast {
+    position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%);
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    padding: .5rem .9rem; font-size: .85rem; max-width: 90vw;
+  }
+  #toast.bad { border-color: var(--bad); color: var(--bad); }
 </style>
+
+<div id="banner" hidden>
+  <span id="banner-text"></span>
+  <button class="action" id="banner-keep">Keep this</button>
+</div>
 
 <header>
   <h1>LP Frame</h1>
+  <nav id="tabs" hidden>
+    <button data-page="now" aria-current="page">Now Playing</button>
+    <button data-page="settings">Settings</button>
+    <button data-page="diagnostics">Diagnostics</button>
+  </nav>
   <span id="playback" class="pill">—</span>
   <span id="conn" class="dead">connecting</span>
+  <button class="action" id="logout" hidden>Log out</button>
 </header>
 
 <main>
-  <section class="now">
-    <img id="art" alt="">
-    <div>
-      <p id="title">Nothing playing</p>
-      <p id="artist"></p>
-      <p id="album"></p>
-      <div class="pills">
-        <span class="pill" id="p-source">—</span>
-        <span class="pill" id="p-amp">amp off</span>
-        <span class="pill" id="p-display">display off</span>
-        <span class="pill" id="p-client"></span>
+  <section id="login" hidden>
+    <h2>Sign in</h2>
+    <p>
+      The password was generated when this device was set up. It is printed in
+      the startup log and stored in <code>/var/lib/lpframe/web-password.txt</code>;
+      <code>lpctl web-password</code> reprints it.
+    </p>
+    <form id="login-form">
+      <input type="password" id="password" autocomplete="current-password"
+             placeholder="Password" aria-label="Password">
+      <button class="action" type="submit">Sign in</button>
+      <span id="login-error" style="color: var(--bad); font-size: .85rem"></span>
+    </form>
+  </section>
+
+  <section id="page-now" hidden>
+    <div class="now">
+      <img id="art" alt="">
+      <div>
+        <p id="title">Nothing playing</p>
+        <p id="artist"></p>
+        <p id="album"></p>
+        <div class="pills">
+          <span class="pill" id="p-source">—</span>
+          <span class="pill" id="p-amp">amp off</span>
+          <span class="pill" id="p-display">display off</span>
+          <span class="pill" id="p-client"></span>
+        </div>
+        <progress id="prog" value="0" max="1"></progress>
+        <div class="times"><span id="pos">0:00</span><span id="dur">0:00</span></div>
       </div>
-      <progress id="prog" value="0" max="1"></progress>
-      <div class="times"><span id="pos">0:00</span><span id="dur">0:00</span></div>
     </div>
   </section>
 
-  <h2>Counters</h2>
-  <div class="counters" id="counters"></div>
+  <section id="page-settings" hidden>
+    <div id="settings-actions" class="pills"></div>
+    <div id="settings-note" style="color: var(--dim); font-size: .8rem"></div>
+    <div id="settings"></div>
+  </section>
 
-  <h2>Enrichment</h2>
-  <div class="counters" id="enrichment"></div>
+  <section id="page-diagnostics" hidden>
+    <h2>Counters</h2>
+    <div class="counters" id="counters"></div>
 
-  <h2>Recent events</h2>
-  <table><tbody id="notes"></tbody></table>
+    <h2>Enrichment</h2>
+    <div class="counters" id="enrichment"></div>
+
+    <h2>Recent events</h2>
+    <p style="color: var(--dim); font-size: .8rem; margin-top: -.4rem">
+      Every enrichment decision appears here with the scores behind it, including
+      the ones that were refused.
+    </p>
+    <table><tbody id="notes"></tbody></table>
+  </section>
 </main>
 
 <footer>
-  Read-only. Settings and authentication arrive with milestone 7 — this page
-  is bound to loopback until then.
+  Plain HTTP on your local network. It is not safe to port-forward, and the
+  password crosses the network in the clear — see <code>docs/DESIGN.md</code> §7.3.
 </footer>
 
+<div id="toast" hidden></div>
+
 <script>
+"use strict";
 const $ = id => document.getElementById(id);
+
+// Everything from the daemon is written with textContent or as an attribute
+// value, never as markup. Track titles come off the AirPlay pipe and a sender
+// chooses them, so treating them as HTML would be a scripting hole in the one
+// page that can change every setting on the device.
+function el(tag, props = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") node.className = v;
+    else if (k === "text") node.textContent = v;
+    else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v !== null && v !== undefined && v !== false) node.setAttribute(k, v);
+  }
+  for (const child of [].concat(children)) if (child) node.append(child);
+  return node;
+}
+
+let toastTimer = null;
+function toast(message, bad) {
+  const node = $("toast");
+  node.textContent = message;
+  node.className = bad ? "bad" : "";
+  node.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { node.hidden = true; }, bad ? 8000 : 3000);
+}
+
+/// Every mutating request carries the custom header the daemon requires; a
+/// form posted from another origin cannot set one.
+async function api(method, path, body) {
+  const options = { method, headers: { "X-LPFrame-Request": "1" } };
+  if (body !== undefined) {
+    options.headers["Content-Type"] = "application/json";
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(path, options);
+  let payload = null;
+  try { payload = await response.json(); } catch (_) { /* empty body */ }
+  if (!response.ok) {
+    if (response.status === 401) { showLogin(); }
+    throw new Error((payload && payload.error) || `${response.status}`);
+  }
+  return payload;
+}
+
+// --- pages ----------------------------------------------------------------
+
+let page = "now";
+function show(next) {
+  page = next;
+  for (const name of ["now", "settings", "diagnostics"]) {
+    $(`page-${name}`).hidden = name !== next;
+  }
+  for (const button of $("tabs").children) {
+    if (button.dataset.page === next) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  }
+  if (next === "settings") loadSettings();
+  if (next === "diagnostics") refreshDiagnostics();
+}
+$("tabs").addEventListener("click", e => {
+  if (e.target.dataset.page) show(e.target.dataset.page);
+});
+
+// --- authentication -------------------------------------------------------
+
+let authRequired = false;
+
+function showLogin() {
+  $("login").hidden = false;
+  $("tabs").hidden = true;
+  $("logout").hidden = true;
+  for (const name of ["now", "settings", "diagnostics"]) $(`page-${name}`).hidden = true;
+}
+
+function showApp() {
+  $("login").hidden = true;
+  $("tabs").hidden = false;
+  $("logout").hidden = !authRequired;
+  show(page);
+  connect();
+}
+
+$("login-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("login-error").textContent = "";
+  try {
+    await api("POST", "/api/login", { password: $("password").value });
+    $("password").value = "";
+    showApp();
+  } catch (err) {
+    // The daemon answers a wrong password and an unknown session identically,
+    // so there is nothing more specific to say here honestly.
+    $("login-error").textContent = String(err.message);
+  }
+});
+
+$("logout").addEventListener("click", async () => {
+  try { await api("POST", "/api/logout"); } catch (_) { /* going anyway */ }
+  if (stream) { stream.close(); stream = null; }
+  showLogin();
+});
+
+// --- now playing ----------------------------------------------------------
+
 const fmt = ms => {
   if (!ms && ms !== 0) return "0:00";
   const s = Math.floor(ms / 1000);
@@ -122,42 +322,260 @@ function render(state) {
     : "no artwork";
   $("p-source").className = "pill" + (a && a.is_upgrade ? " on" : "");
 
-  const amp = state.power?.amp;
+  const amp = state.power && state.power.amp;
   $("p-amp").textContent = amp ? "amp on" : "amp off";
   $("p-amp").className = "pill" + (amp ? " on" : "");
-  const disp = state.power?.display || "off";
+  const disp = (state.power && state.power.display) || "off";
   $("p-display").textContent = `display ${disp}`;
   $("p-display").className = "pill" + (disp !== "off" ? " on" : "");
-  $("p-client").textContent = state.session?.client_name || "";
+  $("p-client").textContent = (state.session && state.session.client_name) || "";
 
   const p = state.progress;
-  $("prog").max = p?.duration_ms || 1;
-  $("prog").value = p?.position_ms || 0;
-  $("pos").textContent = fmt(p?.position_ms);
-  $("dur").textContent = fmt(p?.duration_ms);
+  $("prog").max = (p && p.duration_ms) || 1;
+  $("prog").value = (p && p.position_ms) || 0;
+  $("pos").textContent = fmt(p && p.position_ms);
+  $("dur").textContent = fmt(p && p.duration_ms);
 }
+
+// --- diagnostics ----------------------------------------------------------
 
 async function refreshDiagnostics() {
-  try {
-    const d = await (await fetch("/api/diagnostics")).json();
-    const tally = o => Object.entries(o || {})
-      .map(([k, v]) => `<div class="counter"><b>${v}</b><span>${k.replace(/_/g, " ")}</span></div>`)
-      .join("");
-    $("counters").innerHTML = tally(d.counters);
-    $("enrichment").innerHTML = tally(d.enrichment);
-    $("notes").innerHTML = d.notes
-      .map(n => `<tr><td class="ts">${n.ts.slice(11, 19)}</td><td class="in">${n.input}</td><td>${n.text}</td></tr>`)
-      .join("");
-  } catch (_) { /* the stream reports connection state; don't double-report */ }
+  let d;
+  try { d = await api("GET", "/api/diagnostics"); } catch (_) { return; }
+
+  const tally = (into, counts) => {
+    into.replaceChildren(...Object.entries(counts || {}).map(([k, v]) =>
+      el("div", { class: "counter" }, [
+        el("b", { text: String(v) }),
+        el("span", { text: k.replace(/_/g, " ") }),
+      ])));
+  };
+  tally($("counters"), d.counters);
+  tally($("enrichment"), d.enrichment);
+
+  $("notes").replaceChildren(...(d.notes || []).map(n =>
+    el("tr", {}, [
+      el("td", { class: "ts", text: n.ts.slice(11, 19) }),
+      el("td", { class: "in", text: n.input }),
+      el("td", { text: n.text }),
+    ])));
 }
 
-const es = new EventSource("/api/events");
-es.onopen = () => { $("conn").textContent = "live"; $("conn").className = "live"; };
-es.onerror = () => { $("conn").textContent = "reconnecting"; $("conn").className = "dead"; };
-es.onmessage = e => {
-  const msg = JSON.parse(e.data);
-  if (msg.type === "state") { render(msg.state); refreshDiagnostics(); }
+// --- settings -------------------------------------------------------------
+
+const TIER_LABEL = {
+  live: "live",
+  renderer: "needs lprender restart",
+  daemon: "needs artd restart",
 };
-refreshDiagnostics();
-setInterval(refreshDiagnostics, 5000);
+
+let config = null;
+
+async function loadSettings() {
+  try { config = await api("GET", "/api/config"); } catch (e) { toast(e.message, true); return; }
+
+  const note = [];
+  note.push(`Base ${config.paths.base}, overrides ${config.paths.local}.`);
+  if (!config.systemd) {
+    note.push("systemd is not managing this device, so restarts have to be done " +
+              "the way the services were started.");
+  }
+  $("settings-note").textContent = note.join(" ");
+
+  $("settings-actions").replaceChildren(
+    actionButton("Wake the display", "display_wake"),
+    actionButton("Amp on", "amp_on"),
+    actionButton("Amp off", "amp_off"),
+    el("button", {
+      class: "action warn",
+      text: `Restart ${config.units.renderer}`,
+      onclick: () => runAction("restart_renderer"),
+    }),
+    el("button", {
+      class: "action warn",
+      text: `Restart ${config.units.daemon}`,
+      onclick: () => runAction("restart_daemon"),
+    }),
+  );
+
+  const groups = new Map();
+  for (const setting of config.settings) {
+    const section = setting.key.slice(0, setting.key.lastIndexOf("."));
+    if (!groups.has(section)) groups.set(section, []);
+    groups.get(section).push(setting);
+  }
+
+  const nodes = [];
+  for (const [section, settings] of groups) {
+    nodes.push(el("h2", { text: section }));
+    for (const setting of settings) nodes.push(settingRow(setting));
+  }
+  $("settings").replaceChildren(...nodes);
+}
+
+const actionButton = (label, action) =>
+  el("button", { class: "action", text: label, onclick: () => runAction(action) });
+
+async function runAction(action) {
+  try {
+    await api("POST", `/api/actions/${action}`);
+    toast(`${action.replace(/_/g, " ")} done`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+function settingRow(setting) {
+  const control = controlFor(setting);
+  const marks = el("div", { class: "marks" }, [
+    el("span", { class: `tier ${setting.tier}`, text: TIER_LABEL[setting.tier] }),
+    setting.overridden ? el("span", { class: "over", text: "changed" }) : null,
+    setting.overridden
+      ? el("button", {
+          class: "action",
+          text: "Reset",
+          title: `Back to ${JSON.stringify(setting.default)}`,
+          onclick: () => resetKey(setting.key),
+        })
+      : null,
+  ]);
+  return el("div", { class: "setting" }, [
+    el("div", { class: "name" }, [
+      el("code", { text: setting.key.slice(setting.key.lastIndexOf(".") + 1) }),
+      setting.hint ? el("span", { class: "hint", text: setting.hint }) : null,
+    ]),
+    control,
+    marks,
+  ]);
+}
+
+function controlFor(setting) {
+  const commit = value => applyKey(setting.key, value);
+
+  if (typeof setting.value === "boolean") {
+    return el("input", {
+      type: "checkbox",
+      checked: setting.value,
+      onchange: e => commit(e.target.checked),
+    });
+  }
+  if (setting.choices) {
+    const select = el("select", { onchange: e => commit(coerce(setting, e.target.value)) },
+      setting.choices.map(choice =>
+        el("option", { value: choice, text: choice, selected: String(setting.value) === choice })));
+    return select;
+  }
+  if (Array.isArray(setting.value)) {
+    return el("input", {
+      type: "text",
+      value: setting.value.join(", "),
+      onchange: e => commit(e.target.value.split(",").map(s => s.trim()).filter(Boolean)),
+    });
+  }
+  const numeric = typeof setting.value === "number";
+  return el("input", {
+    type: numeric ? "number" : "text",
+    step: numeric ? "any" : false,
+    value: String(setting.value),
+    onchange: e => commit(coerce(setting, e.target.value)),
+  });
+}
+
+const coerce = (setting, text) =>
+  typeof setting.value === "number" ? Number(text) : text;
+
+async function applyKey(key, value) {
+  try {
+    const result = await api("PATCH", "/api/config", { [key]: value });
+    if (result.confirm) {
+      startCountdown(result.confirm);
+    } else {
+      const tiers = (result.tiers || []).map(t => TIER_LABEL[t]);
+      toast(tiers.length ? `${key} saved — ${tiers.join(", ")}` : `${key} saved`);
+    }
+  } catch (e) {
+    toast(e.message, true);
+  }
+  loadSettings();
+}
+
+async function resetKey(key) {
+  try {
+    await api("POST", "/api/config/reset", { keys: [key] });
+    toast(`${key} back to its default`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+  loadSettings();
+}
+
+// --- confirm or revert ----------------------------------------------------
+
+let countdown = null;
+
+// The daemon reverts on its own timer; this only mirrors it, so a browser
+// that is closed, asleep or on the far side of a display that has just gone
+// dark does not stop the device putting itself back.
+function startCountdown(pending) {
+  clearInterval(countdown);
+  let left = pending.seconds;
+  const banner = $("banner");
+  banner.hidden = false;
+
+  const tick = () => {
+    $("banner-text").textContent =
+      `${pending.keys.join(" and ")} applied. Reverting in ${left}s unless you keep it — ` +
+      `if the display has gone dark, wait.`;
+    if (left-- <= 0) {
+      clearInterval(countdown);
+      banner.hidden = true;
+      toast("Not confirmed; the previous display settings were put back", true);
+      loadSettings();
+    }
+  };
+  tick();
+  countdown = setInterval(tick, 1000);
+
+  $("banner-keep").onclick = async () => {
+    clearInterval(countdown);
+    banner.hidden = true;
+    try {
+      const result = await api("POST", "/api/config/confirm", { id: pending.id });
+      toast(result.confirmed ? "Kept" : "Too late; it had already been put back");
+    } catch (e) {
+      toast(e.message, true);
+    }
+    loadSettings();
+  };
+}
+
+// --- the stream -----------------------------------------------------------
+
+let stream = null;
+
+function connect() {
+  if (stream) return;
+  stream = new EventSource("/api/events");
+  stream.onopen = () => { $("conn").textContent = "live"; $("conn").className = "live"; };
+  stream.onerror = () => { $("conn").textContent = "reconnecting"; $("conn").className = "dead"; };
+  stream.onmessage = e => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === "state") {
+      render(msg.state);
+      if (page === "diagnostics") refreshDiagnostics();
+    }
+  };
+}
+
+// --- start ----------------------------------------------------------------
+
+(async () => {
+  try {
+    const session = await fetch("/api/session").then(r => r.json());
+    authRequired = session.auth_required;
+    if (session.authenticated) showApp(); else showLogin();
+  } catch (_) {
+    showLogin();
+  }
+})();
 </script>
