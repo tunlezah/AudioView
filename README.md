@@ -52,8 +52,11 @@ on every login and the session cookie on every request, so it does nothing
 against someone who can capture traffic on your LAN. If that matters, set
 `web.bind = "127.0.0.1:8730"` and use an SSH tunnel, or put a TLS-terminating
 reverse proxy in front. **Do not port-forward it** — there is no WAN mode and
-no cloud component. The full threat model, including what is deliberately not
-defended against, is at the top of `crates/artd/src/web/auth.rs`.
+no cloud component. Login attempts are limited per address, and password
+verification is capped at two at a time device-wide so that a login flood
+costs the daemon 38 MiB rather than as much RAM as the Pi has. The full threat
+model, including what is deliberately not defended against, is at the top of
+`crates/artd/src/web/auth.rs`.
 
 Turning `web.auth` off while bound to anything but loopback makes `artd`
 refuse to start. If something in front of it is doing the authentication, say

@@ -46,9 +46,15 @@
 //!   constant-time by construction.
 //! * **Rate limiting on address, not on account.** There is one account. The
 //!   limit exists to make online guessing hopeless against a 100-bit
-//!   passphrase and to stop an attacker spending the device's CPU on Argon2:
-//!   five verifications a minute is 19 MiB of hashing five times, which a Pi
-//!   can absorb.
+//!   passphrase.
+//! * **A hard cap on verifications in flight, independently of the address
+//!   limit.** Per-address limiting says nothing about how much of the device
+//!   an attacker can consume, because on a LAN an attacker has as many
+//!   addresses as they want — a single host owns a whole IPv6 /64. Without a
+//!   global cap, `spawn_blocking` would happily run Argon2 on all 512 of
+//!   tokio's blocking threads, which at 19 MiB each is 9.7 GiB and a Pi that
+//!   is dead rather than slow. [`Auth::verify_slot`] is what actually bounds
+//!   the memory; the address limit sits on top of it.
 
 use std::collections::HashMap;
 use std::net::IpAddr;
@@ -75,6 +81,31 @@ const PARALLELISM: u32 = 1;
 /// Failed logins allowed per client address per [`LOGIN_WINDOW`].
 const LOGIN_ATTEMPTS: usize = 5;
 const LOGIN_WINDOW: Duration = Duration::from_secs(60);
+
+/// Password verifications permitted to run at once, across all addresses.
+///
+/// Two, because two is enough that the owner never waits behind anyone and
+/// small enough that the worst case is 38 MiB — see the module header for why
+/// the per-address limit does not cover this.
+const MAX_VERIFICATIONS_IN_FLIGHT: usize = 2;
+
+/// How long a login waits for a verification slot before giving up.
+///
+/// Long enough that a queue of legitimate logins all succeed, short enough
+/// that a flood does not hold connections open indefinitely.
+const VERIFY_WAIT: Duration = Duration::from_secs(5);
+
+/// Addresses tracked for rate limiting at once.
+///
+/// Entries expire with [`LOGIN_WINDOW`], and [`MAX_VERIFICATIONS_IN_FLIGHT`]
+/// bounds how fast new ones can be created, so this is a backstop rather than
+/// a limit anything reaches in practice.
+const MAX_TRACKED_ADDRESSES: usize = 4096;
+
+/// Above this many entries, sweep the whole map before adding another. Below
+/// it, the map is small enough that the per-entry prune is the only work
+/// worth doing.
+const SWEEP_THRESHOLD: usize = 256;
 
 /// How long a session lives, matching the cookie's expiry.
 pub const SESSION_LIFETIME: Duration = Duration::from_secs(30 * 24 * 3600);
@@ -172,6 +203,9 @@ pub struct Auth {
     sessions: Mutex<Vec<Session>>,
     /// Recent failed attempts per client address.
     attempts: Mutex<HashMap<IpAddr, Vec<Instant>>>,
+    /// Permits for [`Auth::verify`], bounding Argon2's memory across every
+    /// client at once.
+    verifiers: tokio::sync::Semaphore,
 }
 
 impl Auth {
@@ -180,6 +214,7 @@ impl Auth {
             hash,
             sessions: Mutex::new(Vec::new()),
             attempts: Mutex::new(HashMap::new()),
+            verifiers: tokio::sync::Semaphore::new(MAX_VERIFICATIONS_IN_FLIGHT),
         }
     }
 
@@ -193,6 +228,23 @@ impl Auth {
     /// wrong in.
     pub fn note_attempt(&self, from: IpAddr, now: Instant) -> bool {
         let mut attempts = self.attempts.lock().expect("auth mutex poisoned");
+
+        // An address that has not been seen before costs an entry, and the
+        // supply of addresses is unlimited on a LAN. Drop everything that has
+        // aged out before letting the map grow again.
+        if attempts.len() > SWEEP_THRESHOLD && !attempts.contains_key(&from) {
+            attempts.retain(|_, seen| {
+                seen.retain(|t| now.duration_since(*t) < LOGIN_WINDOW);
+                !seen.is_empty()
+            });
+            if attempts.len() >= MAX_TRACKED_ADDRESSES {
+                // Only reachable while thousands of distinct addresses are
+                // mid-flood. Refusing the newcomer is the conservative end:
+                // an address already in the map keeps its own budget.
+                return false;
+            }
+        }
+
         let recent = attempts.entry(from).or_default();
         recent.retain(|t| now.duration_since(*t) < LOGIN_WINDOW);
         if recent.len() >= LOGIN_ATTEMPTS {
@@ -200,6 +252,18 @@ impl Auth {
         }
         recent.push(now);
         true
+    }
+
+    /// Wait for permission to run one [`Auth::verify`].
+    ///
+    /// `None` means the device is already hashing as much as it will, and the
+    /// caller should refuse rather than queue further. Holding the permit
+    /// across the blocking call is what makes it mean anything.
+    pub async fn verify_slot(&self) -> Option<tokio::sync::SemaphorePermit<'_>> {
+        tokio::time::timeout(VERIFY_WAIT, self.verifiers.acquire())
+            .await
+            .ok()?
+            .ok()
     }
 
     /// Forget an address's failures, so a legitimate user who mistyped twice
@@ -385,6 +449,56 @@ mod tests {
         // Still refused inside the window, allowed once it has rolled past.
         assert!(!auth.note_attempt(ip, t0 + Duration::from_secs(59)));
         assert!(auth.note_attempt(ip, t0 + Duration::from_secs(61)));
+    }
+
+    #[test]
+    fn the_address_table_does_not_grow_without_bound() {
+        // The attacker this models has a whole IPv6 /64 and uses each address
+        // once, which is exactly the case per-address limiting cannot see.
+        let auth = Auth::new(hash_password("pw").unwrap());
+        let t0 = Instant::now();
+        for i in 0..(SWEEP_THRESHOLD as u64 * 4) {
+            let ip: IpAddr = format!("2001:db8::{i:x}").parse().unwrap();
+            auth.note_attempt(ip, t0);
+        }
+        let grown = auth.attempts.lock().unwrap().len();
+
+        // One more attempt after the window has rolled sweeps every stale
+        // entry rather than adding to them.
+        let fresh: IpAddr = "2001:db8:1::1".parse().unwrap();
+        assert!(auth.note_attempt(fresh, t0 + LOGIN_WINDOW + Duration::from_secs(1)));
+        let after = auth.attempts.lock().unwrap().len();
+        assert!(
+            after < grown && after == 1,
+            "{grown} entries became {after}; stale addresses were retained"
+        );
+    }
+
+    #[tokio::test]
+    async fn only_a_bounded_number_of_verifications_run_at_once() {
+        // Argon2 at 19 MiB times tokio's 512 blocking threads is more memory
+        // than the device has, so the cap is the thing standing between a
+        // login flood and an OOM.
+        let auth = Auth::new(hash_password("pw").unwrap());
+        let mut held = Vec::new();
+        for i in 0..MAX_VERIFICATIONS_IN_FLIGHT {
+            held.push(auth.verify_slot().await.unwrap_or_else(|| {
+                panic!("slot {i} should have been free");
+            }));
+        }
+        // The next one waits VERIFY_WAIT and then gives up rather than
+        // queueing another 19 MiB behind the ones already running.
+        tokio::time::pause();
+        let refused = tokio::time::timeout(VERIFY_WAIT * 2, auth.verify_slot())
+            .await
+            .expect("verify_slot must give up on its own");
+        assert!(refused.is_none());
+
+        drop(held.pop());
+        assert!(
+            auth.verify_slot().await.is_some(),
+            "a released slot was not reusable"
+        );
     }
 
     #[test]

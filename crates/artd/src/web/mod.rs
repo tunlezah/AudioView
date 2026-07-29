@@ -376,7 +376,18 @@ async fn api_login(
     }
 
     // Argon2id at these parameters costs tens of milliseconds and 19 MiB,
-    // which is the point of it; it does not belong on the async runtime.
+    // which is the point of it; it does not belong on the async runtime. The
+    // permit is held across the whole blocking call, because it is the 19 MiB
+    // that is being rationed and not the decision to spend it.
+    let Some(_slot) = auth.verify_slot().await else {
+        tracing::warn!("web login refused: no verification slot free (flood from {from}?)");
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            [(header::RETRY_AFTER, "5")],
+            Json(json!({ "error": "the device is busy; try again" })),
+        )
+            .into_response();
+    };
     let verifier = auth.clone();
     let password = body.password;
     let ok = tokio::task::spawn_blocking(move || verifier.verify(&password))
@@ -484,21 +495,41 @@ async fn api_events(
 ///
 /// Served from the published path rather than an arbitrary one: this handler
 /// must never become a way to read any file on the device.
-async fn api_artwork(AxumState(app): AxumState<App>) -> Response {
+///
+/// The digest the daemon already computed is the validator, so a page left
+/// open through a long album re-fetches once per cover rather than once per
+/// poll. `no-cache` alongside it means "revalidate", not "do not store": the
+/// browser still has to ask, and the answer is 304 until the art changes.
+async fn api_artwork(AxumState(app): AxumState<App>, headers: HeaderMap) -> Response {
     let (_, state) = app.hub.snapshot();
     let Some(art) = state.artwork else {
         return StatusCode::NOT_FOUND.into_response();
     };
+
+    let etag = format!("\"{}\"", art.sha256);
+    let known = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|tag| tag.trim() == etag));
+    if known {
+        return (
+            StatusCode::NOT_MODIFIED,
+            [
+                (header::ETAG, etag.as_str()),
+                (header::CACHE_CONTROL, "no-cache"),
+            ],
+        )
+            .into_response();
+    }
+
     match tokio::fs::read(&art.path).await {
         Ok(bytes) => {
             let mime = crate::artwork::ImageKind::sniff(&bytes).mime();
             (
                 [
                     (header::CONTENT_TYPE, mime),
-                    // Content-addressed by revision, so caching is safe and
-                    // the page never shows the previous track's art.
                     (header::CACHE_CONTROL, "no-cache"),
-                    (header::ETAG, ""),
+                    (header::ETAG, etag.as_str()),
                 ],
                 bytes,
             )

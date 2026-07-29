@@ -65,6 +65,7 @@ struct Harness {
     local: PathBuf,
     password: String,
     hash: String,
+    hub: Hub,
     commands: tokio::sync::mpsc::Receiver<Command>,
 }
 
@@ -96,8 +97,9 @@ impl Harness {
         }
 
         let (cmd_tx, commands) = tokio::sync::mpsc::channel(16);
+        let hub = Hub::new(32);
         let app = App::new(
-            Hub::new(32),
+            hub.clone(),
             resolved,
             Settings::new(config.clone(), local.clone(), cmd_tx),
         )
@@ -118,8 +120,30 @@ impl Harness {
             local,
             password,
             hash,
+            hub,
             commands,
         }
+    }
+
+    /// Publish artwork the way the daemon would, and return its digest.
+    fn publish_artwork(&self, name: &str, bytes: &[u8]) -> String {
+        let path = self.dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let sha256 = format!("{:064x}", bytes.iter().map(|b| *b as u128).sum::<u128>());
+        self.hub.publish(lpframe_proto::State {
+            artwork: Some(lpframe_proto::Artwork {
+                revision: 1,
+                path,
+                sha256: sha256.clone(),
+                bytes: bytes.len() as u64,
+                width: Some(1),
+                height: Some(1),
+                source: lpframe_proto::ArtworkSource::Airplay,
+                is_upgrade: false,
+            }),
+            ..Default::default()
+        });
+        sha256
     }
 
     fn headers(&self, csrf: bool) -> HeaderMap {
@@ -513,6 +537,88 @@ async fn with_auth_disabled_the_pages_open_but_mutations_still_need_the_header()
 
     let (status, _) = h.patch(json!({ "render.ambient": true })).await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_artwork_endpoint_revalidates_against_the_digest() {
+    // The Now Playing page polls this. Without a usable validator every poll
+    // re-sends the whole cover, which on a 3000×3000 upgrade is megabytes an
+    // album — and an `ETag:` with an empty value is not a usable validator,
+    // it is a malformed header that every client ignores.
+    let mut h = Harness::start("artwork-etag", true).await;
+    h.login().await;
+
+    let png = b"\x89PNG\r\n\x1a\nfake but sniffable";
+    let sha = h.publish_artwork("art-1.png", png);
+
+    let first = h.get("/api/artwork/current").await;
+    assert_eq!(first.status(), StatusCode::OK);
+    let etag = first
+        .headers()
+        .get(reqwest::header::ETAG)
+        .expect("no ETag on the artwork")
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(etag, format!("\"{sha}\""), "the ETag is not the digest");
+    assert_eq!(first.bytes().await.unwrap().as_ref(), png);
+
+    let again = h
+        .client
+        .get(format!("{}/api/artwork/current", h.base))
+        .headers(h.headers(false))
+        .header(reqwest::header::IF_NONE_MATCH, &etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(again.status(), StatusCode::NOT_MODIFIED);
+    assert!(again.bytes().await.unwrap().is_empty());
+
+    // New cover, same request: the validator has to stop matching, or the
+    // page keeps showing the previous track's art.
+    let other = b"\x89PNG\r\n\x1a\na different cover entirely";
+    h.publish_artwork("art-2.png", other);
+    let changed = h
+        .client
+        .get(format!("{}/api/artwork/current", h.base))
+        .headers(h.headers(false))
+        .header(reqwest::header::IF_NONE_MATCH, &etag)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::OK);
+    assert_eq!(changed.bytes().await.unwrap().as_ref(), other);
+}
+
+#[tokio::test]
+async fn a_conditional_request_still_needs_a_session() {
+    // The 304 path returns before the file is read, so it is the one place a
+    // shortcut could skip the gate. It must not.
+    let h = Harness::start("artwork-etag-unauth", true).await;
+    let sha = h.publish_artwork("art-1.png", b"\x89PNG\r\n\x1a\nx");
+    let r = h
+        .client
+        .get(format!("{}/api/artwork/current", h.base))
+        .header(reqwest::header::IF_NONE_MATCH, format!("\"{sha}\""))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn an_unknown_path_is_refused_before_it_is_looked_up() {
+    // The guard is a layer over the whole router, so a route that does not
+    // exist — and, more to the point, one added later without a thought for
+    // authentication — fails closed rather than falling through.
+    let h = Harness::start("unknown-path", true).await;
+    for path in ["/api/nothing", "/api/state/", "/API/STATE", "/api"] {
+        assert_eq!(
+            h.get(path).await.status(),
+            StatusCode::UNAUTHORIZED,
+            "{path} answered before the gate"
+        );
+    }
 }
 
 // --- settings --------------------------------------------------------------
