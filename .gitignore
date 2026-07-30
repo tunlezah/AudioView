@@ -5,3 +5,6 @@
 # of the project; ignore the path rather than all of .claude/, which may
 # hold real project settings later.
 /.claude/worktrees/
+
+# Built packages.
+/dist

@@ -31,6 +31,14 @@ Group=lpframe
 # the cache and the web interface's config.local.toml.
 RuntimeDirectory=lpframe
 RuntimeDirectoryMode=0750
+# Load-bearing. Without it systemd deletes /run/lpframe every time this unit
+# stops — and lprender bind-mounts that directory into its namespace to get
+# write access under ProtectSystem=strict. A delete-and-recreate leaves the
+# renderer's mount pointing at an unlinked inode, so it never sees the new
+# socket and the panel keeps the last frame until it is restarted by hand.
+# That is precisely the "artd restarting does not blank the panel" property
+# systemd/README.md claims, so it must not be tidied away.
+RuntimeDirectoryPreserve=yes
 StateDirectory=lpframe
 
 NoNewPrivileges=yes

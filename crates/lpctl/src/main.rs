@@ -41,6 +41,9 @@ enum Command {
     Ping,
     /// Request a display power state.
     Display { value: String },
+    /// Drive the amplifier trigger, for testing it without a listening
+    /// session. The next session or idle transition takes it back.
+    Amp { value: String },
     /// Display an image immediately (artd must be running with --debug).
     Inject { path: PathBuf },
     /// Reprint the generated web interface password.
@@ -143,12 +146,38 @@ async fn main() -> Result<()> {
                 "off" => DisplayPower::Off,
                 other => anyhow::bail!("unknown display state {other:?}; use on, ambient or off"),
             };
-            send(&mut write_half, &ClientMessage::SetDisplay { value }).await?;
+            send_and_confirm(
+                &mut write_half,
+                &mut lines,
+                &ClientMessage::SetDisplay { value },
+            )
+            .await?;
+            println!("display -> {}", value.as_str());
+        }
+        Command::Amp { value } => {
+            let value = match value.as_str() {
+                "on" | "1" | "true" => true,
+                "off" | "0" | "false" => false,
+                other => anyhow::bail!("unknown amp state {other:?}; use on or off"),
+            };
+            send_and_confirm(
+                &mut write_half,
+                &mut lines,
+                &ClientMessage::SetAmp { value },
+            )
+            .await?;
+            println!("amp -> {}", if value { "on" } else { "off" });
         }
         Command::Inject { path } => {
             let path = std::fs::canonicalize(&path)
                 .with_context(|| format!("resolving {}", path.display()))?;
-            send(&mut write_half, &ClientMessage::InjectArtwork { path }).await?;
+            send_and_confirm(
+                &mut write_half,
+                &mut lines,
+                &ClientMessage::InjectArtwork { path: path.clone() },
+            )
+            .await?;
+            println!("injected {}", path.display());
         }
         // Handled before the socket was opened.
         Command::WebPassword => unreachable!(),
@@ -160,6 +189,41 @@ async fn send(w: &mut tokio::net::unix::OwnedWriteHalf, msg: &ClientMessage) -> 
     w.write_all(format!("{}\n", serde_json::to_string(msg)?).as_bytes())
         .await?;
     Ok(())
+}
+
+/// Send a command and wait until the daemon has actually processed it.
+///
+/// Writing and exiting is not enough. The daemon handles a connection's lines
+/// in order, so a `Pong` behind the command is proof the command was seen —
+/// and waiting for it means `lpctl amp on` returning is a fact about the
+/// device rather than about this process's output buffer.
+///
+/// Without this the command still usually arrives, which is worse than never:
+/// whether it does depends on which side gets scheduled first.
+async fn send_and_confirm(
+    w: &mut tokio::net::unix::OwnedWriteHalf,
+    lines: &mut tokio::io::Lines<BufReader<tokio::net::unix::OwnedReadHalf>>,
+    msg: &ClientMessage,
+) -> Result<()> {
+    send(w, msg).await?;
+    send(w, &ClientMessage::Ping).await?;
+
+    let wait = async {
+        while let Some(line) = lines.next_line().await? {
+            if matches!(
+                serde_json::from_str::<ServerMessage>(&line),
+                Ok(ServerMessage::Pong { .. })
+            ) {
+                return Ok(());
+            }
+        }
+        anyhow::bail!("artd closed the connection without acknowledging the command")
+    };
+
+    match tokio::time::timeout(std::time::Duration::from_secs(5), wait).await {
+        Ok(result) => result,
+        Err(_) => anyhow::bail!("artd did not acknowledge the command within 5s"),
+    }
 }
 
 fn print_summary(seq: u64, state: &State, previous: Option<&State>) {

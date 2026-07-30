@@ -65,3 +65,40 @@ jobs:
             target/aarch64-unknown-linux-gnu/release/artd
             target/aarch64-unknown-linux-gnu/release/lpctl
             target/aarch64-unknown-linux-gnu/release/lpcapture
+
+  provisioning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The installer, the packaging scripts and the overlay helpers are the
+      # only part of this repository that runs as root on a device, and the
+      # only part not written in a language with a type checker.
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y shellcheck
+      - name: Lint and dry-run the provisioning scripts
+        run: make provisioning-check
+      # Proves the package builds and lands its files where the units and the
+      # configuration expect them — the cross-checks in
+      # crates/lpframe-config/tests/packaging.rs assert the agreement, this
+      # asserts the .deb is actually producible.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install graphics stack
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            libegl-dev libgles-dev libgbm-dev libdrm-dev libsdl2-dev libegl1-mesa-dev
+      - run: ./provisioning/build-deb.sh
+      - name: Check the package installs and removes cleanly
+        run: |
+          sudo apt-get install -y ./dist/lpframe_*_amd64.deb
+          test -x /usr/bin/artd
+          test -f /usr/share/lpframe/placeholder.png
+          test -f /etc/lpframe/config.toml
+          artd --config /etc/lpframe/config.toml \
+               --config-local /var/lib/lpframe/config.local.toml --check-config
+          sudo apt-get purge -y lpframe
+          test ! -e /var/lib/lpframe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lpframe-deb
+          path: dist/*.deb

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+#
+# Make the root filesystem writable again for maintenance.
+#
+# On a production device the root is an overlay: writes land in RAM and are
+# gone at the next power cut, which is what keeps an SD card alive in an
+# appliance people switch off at the wall. That is also why an `apt upgrade`
+# on such a device appears to work and then un-happens.
+#
+# This turns the overlay off. It takes effect at the next boot, not now.
+#
+#   sudo lpframe-rw && sudo reboot     # do the maintenance
+#   sudo lpframe-ro && sudo reboot     # put it back
+#
+# /var/lib/lpframe is on its own writable partition and is unaffected either
+# way, so settings changed from the web interface survive regardless (DESIGN
+# §8.3).
+
+set -euo pipefail
+
+RASPI_CONFIG="${RASPI_CONFIG:-/usr/bin/raspi-config}"
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "run this with sudo"
+
+if [[ ! -x "$RASPI_CONFIG" ]]; then
+    die "raspi-config is not installed, so this device's overlay was not set
+up the way lpframe-ro sets it up. Undo it however it was made — usually by
+removing 'boot=overlay' from /boot/firmware/cmdline.txt and rebooting."
+fi
+
+# The nonint API is not a stable interface, so check the function is really
+# there rather than discovering it silently did nothing.
+grep -q '^disable_overlayfs' "$RASPI_CONFIG" ||
+    die "this raspi-config has no disable_overlayfs; use 'sudo raspi-config' →
+Performance Options → Overlay File System."
+
+if ! "$RASPI_CONFIG" nonint get_overlay_now; then
+    echo "The root filesystem is already writable at the next boot."
+    exit 0
+fi
+
+"$RASPI_CONFIG" nonint disable_overlayfs
+"$RASPI_CONFIG" nonint disable_bootro 2>/dev/null || true
+
+cat <<'EOF'
+The overlay is off from the next boot.
+
+    sudo reboot
+
+Then the root filesystem is writable and changes stick. Remember to run
+`sudo lpframe-ro` when you have finished — a device left writable will
+eventually be corrupted by a power cut mid-write, and the symptom is a
+filesystem that will not mount rather than anything that names the cause.
+EOF

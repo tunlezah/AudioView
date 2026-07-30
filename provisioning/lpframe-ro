@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+#
+# Put the root filesystem back behind the overlay — the production state.
+#
+# From the next boot, writes to / land in a tmpfs and are discarded at power
+# off. /var/lib/lpframe is on its own partition and stays writable, so the
+# web interface, the artwork cache and the generated password all persist.
+#
+# The check below is the point of this script existing rather than being one
+# raspi-config line in the guide: enabling the overlay while /var/lib/lpframe
+# is still on the root filesystem produces a device that appears to work and
+# forgets every setting at each power cycle, which is a miserable thing to
+# diagnose from the far side of a room.
+
+set -euo pipefail
+
+RASPI_CONFIG="${RASPI_CONFIG:-/usr/bin/raspi-config}"
+STATE_DIR="${STATE_DIR:-/var/lib/lpframe}"
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+[[ $EUID -eq 0 ]] || die "run this with sudo"
+
+[[ -x "$RASPI_CONFIG" ]] ||
+    die "raspi-config is not installed; install it, or enable the overlay by hand."
+
+grep -q '^enable_overlayfs' "$RASPI_CONFIG" ||
+    die "this raspi-config has no enable_overlayfs; use 'sudo raspi-config' →
+Performance Options → Overlay File System."
+
+# `findmnt --target` reports the mount the path is actually on, so a
+# /var/lib/lpframe that is a plain directory on / gives "/" here.
+state_mount="$(findmnt -no TARGET --target "$STATE_DIR" 2>/dev/null || echo "/")"
+if [[ "$state_mount" != "$STATE_DIR" ]]; then
+    cat >&2 <<EOF
+error: $STATE_DIR is on $state_mount, not a partition of its own.
+
+Enabling the overlay now would make the device forget every setting, the
+generated web password and the whole artwork cache at each power cycle — and
+it would look like it was working until the first reboot.
+
+Run this first:
+
+    sudo ./provisioning/make-writable-partition.sh
+
+or, if you have decided you genuinely want a device with no persistent
+settings:
+
+    STATE_DIR=/ sudo lpframe-ro
+EOF
+    exit 1
+fi
+
+if "$RASPI_CONFIG" nonint get_overlay_now; then
+    echo "The overlay is already on from the next boot."
+    exit 0
+fi
+
+"$RASPI_CONFIG" nonint enable_overlayfs
+
+cat <<EOF
+The overlay is on from the next boot.
+
+    sudo reboot
+
+After that:
+  * / is read-only in effect — writes vanish at power off
+  * $STATE_DIR stays writable, so settings and the cache persist
+  * \`sudo lpframe-rw && sudo reboot\` when you need to change the system
+EOF

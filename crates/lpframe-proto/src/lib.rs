@@ -253,6 +253,15 @@ pub enum ClientMessage {
     SetDisplay {
         value: DisplayPower,
     },
+    /// Override the amplifier trigger.
+    ///
+    /// An override, not a mode: the next session or idle transition moves the
+    /// line again. It exists so the trigger can be tested against a
+    /// multimeter without waiting for a listening session, and so the
+    /// Diagnostics page's buttons do something.
+    SetAmp {
+        value: bool,
+    },
     /// Debug builds only; rejected otherwise.
     InjectArtwork {
         path: PathBuf,
@@ -360,5 +369,24 @@ mod tests {
         };
         let json = serde_json::to_string(&state).unwrap();
         assert_eq!(serde_json::from_str::<State>(&json).unwrap(), state);
+    }
+}
+
+#[cfg(test)]
+mod amp_wire {
+    use super::*;
+
+    #[test]
+    fn set_amp_round_trips_and_is_not_swallowed_as_unknown() {
+        // `#[serde(other)]` means a variant the daemon does not know about
+        // decodes to Unknown and is ignored rather than being an error — so
+        // a message that fails to match its own name fails silently, and the
+        // symptom is a command that does nothing.
+        for value in [true, false] {
+            let sent = ClientMessage::SetAmp { value };
+            let json = serde_json::to_string(&sent).unwrap();
+            assert_eq!(json, format!(r#"{{"type":"set_amp","value":{value}}}"#));
+            assert_eq!(serde_json::from_str::<ClientMessage>(&json).unwrap(), sent);
+        }
     }
 }

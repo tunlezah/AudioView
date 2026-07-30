@@ -117,12 +117,33 @@ async fn serve(
     // is queued rather than missed.
     let mut updates = hub.subscribe();
 
-    write_half
-        .write_all(ServerMessage::hello().to_line().as_bytes())
-        .await?;
-    write_half
-        .write_all(hub.current_message().to_line().as_bytes())
-        .await?;
+    // A client that will not read is not necessarily a client with nothing
+    // to say.
+    //
+    // `lpctl amp on` writes its command and exits. By the time this task gets
+    // scheduled the socket is often already half-closed, so the greeting
+    // below fails with EPIPE — and if that error ended the connection, the
+    // command sitting in the read buffer would go with it. The symptom is a
+    // one-shot command that works or does nothing depending on scheduling,
+    // which is a miserable thing to chase.
+    //
+    // So writes degrade instead of aborting: once the far end has stopped
+    // reading, stop writing and keep draining input until EOF. There is no
+    // leak in this — a client that has really gone hits EOF immediately.
+    let mut writable = true;
+    macro_rules! reply {
+        ($bytes:expr) => {
+            if writable {
+                if let Err(e) = write_half.write_all($bytes).await {
+                    tracing::debug!("client stopped reading ({e}); draining its input");
+                    writable = false;
+                }
+            }
+        };
+    }
+
+    reply!(ServerMessage::hello().to_line().as_bytes());
+    reply!(hub.current_message().to_line().as_bytes());
 
     loop {
         tokio::select! {
@@ -136,7 +157,7 @@ async fn serve(
                         if let Some(reply) =
                             handle(msg, &hub, &commands, debug).await
                         {
-                            write_half.write_all(reply.to_line().as_bytes()).await?;
+                            reply!(reply.to_line().as_bytes());
                         }
                     }
                     // Malformed input from a client is that client's problem;
@@ -144,16 +165,14 @@ async fn serve(
                     Err(e) => tracing::debug!("ignoring unparseable client message: {e}"),
                 }
             }
-            update = updates.recv() => {
+            update = updates.recv(), if writable => {
                 match update {
-                    Ok(msg) => write_half.write_all(msg.to_line().as_bytes()).await?,
+                    Ok(msg) => reply!(msg.to_line().as_bytes()),
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         // Every message is a full snapshot, so a lagging
                         // client recovers simply by receiving the next one.
                         tracing::warn!("client lagged {n} snapshot(s)");
-                        write_half
-                            .write_all(hub.current_message().to_line().as_bytes())
-                            .await?;
+                        reply!(hub.current_message().to_line().as_bytes());
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => return Ok(()),
                 }
@@ -179,6 +198,10 @@ async fn handle(
         }
         ClientMessage::SetDisplay { value } => {
             let _ = commands.send(Command::SetDisplay(value)).await;
+            None
+        }
+        ClientMessage::SetAmp { value } => {
+            let _ = commands.send(Command::SetAmp(value)).await;
             None
         }
         ClientMessage::InjectArtwork { path } => {

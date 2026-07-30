@@ -353,6 +353,49 @@ async fn a_malformed_client_message_does_not_break_the_connection() {
     assert!(matches!(c.next().await, ServerMessage::Pong { .. }));
 }
 
+#[tokio::test]
+async fn a_command_from_a_client_that_immediately_leaves_is_still_obeyed() {
+    // This is exactly what `lpctl amp on` does: connect, write, exit. By the
+    // time the daemon's connection task runs, the socket is usually already
+    // gone, so the greeting it writes first fails with EPIPE.
+    //
+    // That error used to end the connection — taking the command sitting
+    // unread in the buffer with it. Whether `lpctl amp on` did anything then
+    // came down to which side the scheduler picked, which is the worst
+    // possible way for a command to fail.
+    //
+    // Written with the blocking std socket on purpose: dropping it closes
+    // both halves at once, which is what a process exiting does and what
+    // tokio's split halves make awkward to reproduce.
+    let d = Daemon::start("fire-and-forget");
+
+    for (attempt, on) in [true, false, true].into_iter().enumerate() {
+        {
+            use std::io::Write;
+            let mut raw = std::os::unix::net::UnixStream::connect(&d.socket).unwrap();
+            let hello = serde_json::to_string(&ClientMessage::Hello {
+                client: "lpctl".into(),
+                proto: lpframe_proto::PROTOCOL_VERSION,
+            })
+            .unwrap();
+            let cmd = serde_json::to_string(&ClientMessage::SetAmp { value: on }).unwrap();
+            raw.write_all(format!("{hello}\n{cmd}\n").as_bytes())
+                .unwrap();
+            // No read, no shutdown, no flush-and-wait — just leave, exactly
+            // as a one-shot process does.
+        }
+
+        let mut c = Client::connect(&d.socket).await;
+        let state = c
+            .wait_for("the amp override to land", |s| s.power.amp == on)
+            .await;
+        assert_eq!(
+            state.power.amp, on,
+            "attempt {attempt}: the command was dropped"
+        );
+    }
+}
+
 #[test]
 fn check_config_validates_without_starting_anything() {
     let out = Command::new(env!("CARGO_BIN_EXE_artd"))

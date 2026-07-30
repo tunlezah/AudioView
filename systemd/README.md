@@ -63,17 +63,54 @@ purpose:
 `PrivateTmp=no` on `lpframe-artd` and `shairport-sync` is required, not an
 oversight: they share the metadata FIFO through the real `/tmp`.
 
-## Not done yet
+## The runtime directory outlives the daemon
 
-- **No `ExecStop` dropping the amp GPIO.** DESIGN §5.5 calls for `artd` to
-  drive the trigger line low on shutdown. There is no GPIO backend until
-  milestone 6, so there is nothing to drive. The external pull-down resistor
-  the build guide requires is what actually covers the crash case anyway.
-- `shairport-sync.service` and `nqptp.service` here are ours, and replace
-  whatever the upstream builds install. They assume `/usr/local/bin`, which
-  is where the from-source build in DESIGN §2.3 puts them. The installer that
-  reconciles this with a distro package lands with milestone 8.
-- Nothing installs these files yet; `provisioning/install.sh` is milestone 8.
+`lpframe-artd.service` sets **`RuntimeDirectoryPreserve=yes`**, and that is
+not tidiness — it is the other half of the "artd restarting does not blank
+the panel" claim above.
+
+`RuntimeDirectory=lpframe` makes systemd create `/run/lpframe` and, by
+default, **delete it when the unit stops**. Meanwhile `lprender` lists that
+directory in `ReadWritePaths=`, which under `ProtectSystem=strict` means it
+is bind-mounted into the renderer's mount namespace. Delete and recreate the
+directory underneath that, and the renderer's mount still refers to the old,
+now-unlinked inode: it waits for a socket that will never appear there again,
+and the panel holds the last frame until something restarts it.
+
+`provisioning/lpframe.tmpfiles.conf` creates the same directory at boot, so
+it exists before either service starts — including on a boot where `artd`
+fails and the renderer comes up anyway. `lprender`'s `ReadWritePaths` is
+prefixed with `-` so that a missing directory leaves it waiting on a black
+screen, which is its designed behaviour, rather than failing to start at all.
+
+`crates/lpframe-config/tests/packaging.rs` fails if any of this is removed.
+
+## Installing them
+
+`provisioning/install.sh` does it, along with everything else a device needs
+— see [docs/BUILD.md](../docs/BUILD.md). The `.deb` from
+`provisioning/build-deb.sh` carries the two `lpframe-*` units and the
+tmpfiles fragment, but deliberately not `shairport-sync.service` or
+`nqptp.service`: those daemons are upstream's to package, and shipping units
+for someone else's software would make us answerable for its security
+updates.
+
+The installer decides between our `shairport-sync.service` and the distro's:
+ours assumes `/usr/local/bin`, which is where the from-source build in DESIGN
+§2.3 puts things, so it installs ours only when it built them. A packaged
+`shairport-sync` that already reports `AirPlay2` keeps its own units.
+
+## Still outstanding
+
+- **No `ExecStop` dropping the amp GPIO.** `artd` handles `SIGTERM` and drives
+  the trigger inactive itself, which covers `systemctl stop` and a clean
+  reboot; an `ExecStop` would be a second path to the same place. Nothing
+  covers `SIGKILL` or a power cut, and nothing in software can — the external
+  pull-down resistor is what actually covers that case. See below.
+- These units have not been run under a real systemd on real hardware.
+  Everything above is from the documentation and from the tests in
+  `packaging.rs`; `systemd-analyze verify` on a device is still the check
+  that has not happened.
 
 ## Trying them by hand
 

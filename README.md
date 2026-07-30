@@ -19,7 +19,8 @@ Square panels are the intent, but any resolution, aspect ratio, orientation, or 
 
 ## Status
 
-Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
+Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)** for how it works
+and **[docs/BUILD.md](docs/BUILD.md)** to build one.
 
 | # | Milestone | |
 |---|---|---|
@@ -30,7 +31,44 @@ Design signed off. See **[docs/DESIGN.md](docs/DESIGN.md)**.
 | 5 | Enrichment | done — gate thresholds unvalidated against real cover art |
 | 6 | Power management | done — GPIO line driving unverified on hardware |
 | 7 | Web interface | done — see the note on live settings below |
-| 8 | Provisioning + `docs/BUILD.md` | next |
+| 8 | Provisioning + `docs/BUILD.md` | done — untested end to end on real hardware |
+| 9 | *Bonus:* a pi-gen stage producing a flashable image | not started |
+
+## Installing on a device
+
+**[docs/BUILD.md](docs/BUILD.md)** is the full guide: parts, flashing, getting
+a panel to light up, the amplifier trigger circuit, the read-only root, and
+what to look at when it does not work.
+
+The short version, on a freshly flashed Raspberry Pi OS Lite 64-bit:
+
+```bash
+git clone https://github.com/tunlezah/AudioView.git && cd AudioView
+sudo ./provisioning/install.sh --dry-run     # read the plan first
+sudo ./provisioning/install.sh
+```
+
+It is idempotent, it will not overwrite a config you have edited, and
+`--dry-run` genuinely changes nothing — every mutation goes through one
+wrapper, and a test asserts that no privileged command bypasses it.
+
+To avoid a Rust toolchain on the device, build a package elsewhere instead:
+
+```bash
+./provisioning/build-deb.sh --target aarch64-unknown-linux-gnu
+scp dist/lpframe_*_arm64.deb lpframe.local:
+# then, on the device
+sudo apt install ./lpframe_*_arm64.deb
+sudo ./provisioning/install.sh --skip-lpframe
+```
+
+| | |
+|---|---|
+| `provisioning/install.sh` | clean OS → working device; `--dry-run`, `--uninstall` |
+| `provisioning/build-deb.sh` | the `.deb`, cross-buildable |
+| `provisioning/make-writable-partition.sh` | `/var/lib/lpframe` on its own partition, so settings survive a read-only root |
+| `provisioning/lpframe-ro`, `lpframe-rw` | overlay root on and off |
+| `provisioning/config.toml` | the shipped configuration |
 
 ## The web interface
 

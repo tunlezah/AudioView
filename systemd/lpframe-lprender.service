@@ -29,7 +29,13 @@ RestrictSUIDSGID=yes
 PrivateTmp=yes
 # The socket and the artwork it reads by path both live here. Read-only would
 # do for the artwork, but the socket needs write.
-ReadWritePaths=/run/lpframe
+#
+# The `-` matters: without it, a path that does not exist yet fails the mount
+# namespace and the unit refuses to start. tmpfiles.d creates this at boot,
+# but a renderer started before tmpfiles has run — or on a device where the
+# tmpfiles fragment was not installed — should come up on a black screen and
+# wait, which is its designed behaviour, rather than enter a restart loop.
+ReadWritePaths=-/run/lpframe
 DevicePolicy=closed
 # char-drm covers every /dev/dri node. Naming card0 explicitly would be
 # wrong: the numbering moves when the v3d render node enumerates first
