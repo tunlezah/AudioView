@@ -1,0 +1,147 @@
+name: Image
+
+# Not on push: this takes the best part of an hour, most of it spent
+# compiling shairport-sync under emulation because Debian's build has no
+# AirPlay 2. Run it deliberately, or on a tag.
+on:
+  workflow_dispatch:
+    inputs:
+      data_size:
+        description: "Size of the /var/lib/lpframe partition, in MiB"
+        default: "2048"
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install the cross toolchain and pi-gen's dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            gcc-aarch64-linux-gnu \
+            quilt parted qemu-user-static debootstrap zerofree zip \
+            dosfstools libarchive-tools libcap2-bin rsync xz-utils curl \
+            xxd file git kmod bc gpg pigz arch-test kpartx
+
+      # The runner has systemd, so this is what actually registers the
+      # aarch64 handler. Without it the first chroot command in the build
+      # fails with "Exec format error", which does not name its own cause.
+      - name: Register aarch64 binfmt
+        run: |
+          sudo systemctl restart systemd-binfmt || true
+          test -e /proc/sys/fs/binfmt_misc/qemu-aarch64
+          echo "aarch64 emulation registered"
+
+      # A GitHub runner has ~14GB free on / and more on /mnt. pi-gen wants
+      # around 12GB for the work tree.
+      - name: Make room
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Build the image
+        run: |
+          sudo --preserve-env=PATH,CARGO_HOME,RUSTUP_HOME env "PATH=$PATH" \
+            ./provisioning/pi-gen/build-image.sh \
+              --data-size "${{ github.event.inputs.data_size || '2048' }}"
+
+      # An image nobody has looked inside is a 700MB file with a plausible
+      # name. These are the properties that would otherwise be discovered by
+      # flashing a card.
+      - name: Check what came out
+        run: |
+          set -euo pipefail
+          IMG_XZ="$(ls dist/*.img.xz)"
+          echo "built $IMG_XZ ($(du -h "$IMG_XZ" | cut -f1))"
+          xz -d --keep "$IMG_XZ"
+          IMG="${IMG_XZ%.xz}"
+
+          echo "--- partition table"
+          sfdisk -l "$IMG"
+          test "$(sfdisk --json "$IMG" | grep -c '"node"')" -eq 3 \
+            || { echo "expected three partitions"; exit 1; }
+
+          LOOP="$(sudo losetup --show --find --partscan "$IMG")"
+          trap 'sudo losetup -d "$LOOP" || true' EXIT
+          sudo mkdir -p /mnt/boot /mnt/root /mnt/data
+          sudo mount "${LOOP}p1" /mnt/boot
+          sudo mount "${LOOP}p2" /mnt/root
+          sudo mount "${LOOP}p3" /mnt/data
+
+          echo "--- the data partition"
+          test "$(lsblk -no LABEL "${LOOP}p3")" = "lpframe" \
+            || { echo "partition 3 is not labelled lpframe"; exit 1; }
+
+          echo "--- our software is actually in there"
+          for f in usr/bin/artd usr/bin/lprender usr/bin/lpctl \
+                   usr/share/lpframe/placeholder.png \
+                   etc/lpframe/config.toml \
+                   etc/systemd/system/lpframe-artd.service \
+                   usr/lib/tmpfiles.d/lpframe.conf; do
+            sudo test -e "/mnt/root/$f" || { echo "missing /$f"; exit 1; }
+          done
+
+          echo "--- shairport-sync has AirPlay 2"
+          sudo test -x /mnt/root/usr/local/bin/shairport-sync \
+            || { echo "no shairport-sync was built"; exit 1; }
+          sudo test -x /mnt/root/usr/local/bin/nqptp \
+            || { echo "no nqptp was built"; exit 1; }
+          # Run it under qemu rather than trusting that it was configured
+          # correctly: the whole reason we compile it is that Debian's build
+          # reports the same version without AirPlay 2 in it.
+          sudo chroot /mnt/root /usr/local/bin/shairport-sync -V | tee /tmp/spv
+          grep -q AirPlay2 /tmp/spv \
+            || { echo "shairport-sync was built without AirPlay 2"; exit 1; }
+
+          echo "--- the units are enabled"
+          for u in lpframe-artd lpframe-lprender shairport-sync nqptp; do
+            sudo test -L "/mnt/root/etc/systemd/system/multi-user.target.wants/$u.service" \
+              || { echo "$u is not enabled"; exit 1; }
+          done
+          sudo test -L /mnt/root/etc/systemd/system/getty@tty1.service \
+            || { echo "getty@tty1 is not masked; it will fight for DRM master"; exit 1; }
+
+          echo "--- boot configuration"
+          sudo grep -q 'dtoverlay=vc4-kms-v3d,cma-256' /mnt/boot/config.txt \
+            || { echo "the KMS overlay is not configured"; exit 1; }
+          test "$(sudo grep -c 'dtoverlay=vc4-kms-v3d' /mnt/boot/config.txt)" -eq 1 \
+            || { echo "the overlay is listed more than once"; exit 1; }
+          if sudo grep -q ' resize' /mnt/boot/cmdline.txt; then
+            echo "cmdline.txt still asks for a resize; it would eat partition 3"
+            exit 1
+          fi
+          sudo test -e /mnt/boot/lpframe-README.txt || { echo "no README on the boot partition"; exit 1; }
+
+          echo "--- and no credentials"
+          sudo test ! -e /mnt/data/web-password.txt || { echo "a web password is baked in"; exit 1; }
+          sudo test ! -e /mnt/root/var/lib/lpframe/web-password.txt || { echo "a web password is baked in"; exit 1; }
+          sudo sh -c 'ls /mnt/root/etc/ssh/ssh_host_* 2>/dev/null' \
+            && { echo "SSH host keys are baked in"; exit 1; } || true
+          sudo test ! -e /mnt/boot/userconf.txt || { echo "a user account is baked in"; exit 1; }
+
+          sudo umount /mnt/boot /mnt/root /mnt/data
+          rm -f "$IMG"
+          echo "image looks right"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lpframe-image
+          path: |
+            dist/*.img.xz
+            dist/*.sha256
+          retention-days: 14

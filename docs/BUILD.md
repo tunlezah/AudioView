@@ -91,12 +91,27 @@ Making room later means taking the card to another machine.
 
 So, after Imager finishes and **before the first boot**, with the card still
 in the machine that wrote it, open the small FAT partition (it mounts as
-`bootfs`) and edit `cmdline.txt`. Delete this fragment, leaving the rest of
-the line alone:
+`bootfs`) and edit `cmdline.txt`. Delete the word `resize`, leaving the rest
+of the line alone:
 
 ```
-init=/usr/lib/raspberrypi-sys-mods/firstboot
+console=serial0,115200 console=tty1 root=PARTUUID=… rootfstype=ext4 fsck.repair=yes rootwait resize
+                                                                                            ^^^^^^
 ```
+
+That bare word is the whole mechanism on current Raspberry Pi OS. The resize
+runs from the initramfs, out of
+`/usr/share/initramfs-tools/scripts/local-premount/resize_early`, whose first
+act is `grep -q ' resize' /proc/cmdline` — remove the token and it exits
+without doing anything.
+
+> Older images, and most guides still online, instead say to delete
+> `init=/usr/lib/raspi-config/init_resize.sh` or
+> `init=/usr/lib/raspberrypi-sys-mods/firstboot`. Those were earlier
+> mechanisms. If your `cmdline.txt` has one of them, remove that as well —
+> but on a current image the word `resize` is the one that matters, and
+> deleting only the `init=` fragment leaves the root partition expanding
+> anyway.
 
 It is all one line. Do not introduce a newline — everything after a line
 break is silently ignored, and the symptom is a Pi that does not boot with no
@@ -428,24 +443,33 @@ working after an update. To see what is on yours:
 gpiodetect
 ```
 
-Test it with nothing attached, watching a multimeter or an LED. Stop the
-daemon first — two things cannot hold the same line:
-
-```bash
-sudo systemctl stop lpframe-artd
-gpioset --mode=time --sec=2 $(gpiodetect | grep -m1 -o '^gpiochip[0-9]*') 17=1
-sudo systemctl start lpframe-artd
-```
-
-Then, from the Diagnostics page or the command line:
+Test it with nothing attached first, watching a multimeter or an LED:
 
 ```bash
 lpctl amp on
 lpctl amp off
 ```
 
-Each of those waits for the daemon to acknowledge before returning, so a
-command that comes back has been carried out rather than merely sent.
+Each waits for the daemon to acknowledge before returning, so a command that
+comes back has been carried out rather than merely sent. Use these rather
+than poking the line by hand: they go through the configured chip, line,
+`active_low` and `pulse`, so they test what the device will actually do
+instead of a hand-typed approximation of it. The Diagnostics page has the
+same two buttons.
+
+To look at the line itself:
+
+```bash
+gpiodetect          # which chips exist, and their labels
+gpioinfo            # every line, its direction and who holds it
+```
+
+While `artd` is running it holds the line, so `gpioinfo` shows it as used by
+`lpframe`. Anything that drives the line directly needs the daemon stopped
+first — two things cannot hold the same line — and note that trixie ships
+libgpiod **2.x**, whose `gpioset` takes different arguments from the version
+1 syntax most guides online still show. Check `gpioset --help` on the device
+rather than copying an incantation.
 
 **`on_event`.** `session_begin` fires once when a listening session starts
 and once when it ends, with about ten seconds of hysteresis either side.
@@ -675,16 +699,41 @@ See DESIGN §7.1.
 
 ---
 
-## Building an image instead
+## Skipping all of this: a prebuilt image
 
-Everything above produces one device. To produce many — or to reproduce this
-one exactly — the pieces are scriptable: `build-deb.sh` makes the package,
-`install.sh --no-build` consumes it, and neither needs interaction with
-`--yes`. A [pi-gen](https://github.com/RPi-Distro/pi-gen) stage wrapping
-those two into a flashable `.img` is milestone 9 and is not written yet.
+Everything above installs onto a stock Raspberry Pi OS. There is also a
+pi-gen stage that bakes it all into a flashable `.img` — no OS install, no
+compiler, no installer run:
 
-Until then, the practical approach is to build one device, get it exactly
-right, and image the card:
+```bash
+sudo ./provisioning/pi-gen/build-image.sh
+# → dist/YYYY-MM-DD-lpframe-lpframe.img.xz
+```
+
+An hour, and about 12GB of disk. It cross-builds the package, runs pi-gen
+against a pinned commit, and appends a third partition for
+`/var/lib/lpframe` — so steps 2, 5 and the first half of 10 above are already
+done when you flash it.
+
+The image is built by running the very installer documented above, so it
+cannot drift from it.
+
+**It has no credentials of any kind**: no user, no password, no SSH host
+keys, no web password. Set the first three with Raspberry Pi Imager's
+customisation when you write the card; `artd` generates the last on the
+device at first boot. Because the text console is masked so the renderer can
+own the display, **a card flashed without that customisation has no way
+in** — `lpframe-README.txt` on the boot partition says so, and how to recover
+with a hand-written `userconf.txt`.
+
+Details, and why the root partition deliberately does not expand:
+[provisioning/pi-gen/README.md](../provisioning/pi-gen/README.md).
+
+No image produced by it has yet been booted on hardware.
+
+## Cloning a device you have already built
+
+If you would rather image a device you have got working:
 
 ```bash
 # on another machine, card inserted, nothing mounted
@@ -694,7 +743,7 @@ sudo dd if=/dev/sdX of=lpframe.img bs=4M status=progress
 Shrink it afterwards with [PiShrink](https://github.com/Drewsif/PiShrink) if
 you intend to write it to smaller cards.
 
-The image carries the generated web password hash and the SSH host keys.
+That image carries the generated web password hash and the SSH host keys.
 Regenerate both on any device flashed from it, or every one of them will
 share a password and a host identity:
 

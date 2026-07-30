@@ -32,7 +32,7 @@ and **[docs/BUILD.md](docs/BUILD.md)** to build one.
 | 6 | Power management | done — GPIO line driving unverified on hardware |
 | 7 | Web interface | done — see the note on live settings below |
 | 8 | Provisioning + `docs/BUILD.md` | done — untested end to end on real hardware |
-| 9 | *Bonus:* a pi-gen stage producing a flashable image | not started |
+| 9 | *Bonus:* pi-gen flashable image | done — no image booted on hardware yet |
 
 ## Installing on a device
 
@@ -69,6 +69,17 @@ sudo ./provisioning/install.sh --skip-lpframe
 | `provisioning/make-writable-partition.sh` | `/var/lib/lpframe` on its own partition, so settings survive a read-only root |
 | `provisioning/lpframe-ro`, `lpframe-rw` | overlay root on and off |
 | `provisioning/config.toml` | the shipped configuration |
+| `provisioning/pi-gen/` | a flashable `.img`, built by running the installer above ([README](provisioning/pi-gen/README.md)) |
+
+Or skip the OS install entirely and build a card image:
+
+```bash
+sudo ./provisioning/pi-gen/build-image.sh     # ~1 hour → dist/*.img.xz
+```
+
+It carries no credentials — no user, no password, no SSH host keys, no web
+password. Raspberry Pi Imager's customisation supplies the first three when
+you write the card; `artd` generates the last on the device.
 
 ## The web interface
 

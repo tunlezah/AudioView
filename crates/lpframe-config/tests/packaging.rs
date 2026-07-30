@@ -429,6 +429,164 @@ fn the_installer_and_the_package_agree_on_what_a_device_gets() {
     }
 }
 
+// --- the image build ---------------------------------------------------------
+
+#[test]
+fn the_image_stage_uses_the_installer_rather_than_restating_it() {
+    // The value of the pi-gen stage is that it runs the same script a person
+    // runs by hand. A stage that grew its own copy of the setup steps would
+    // drift from install.sh, and the drift would only show up on a flashed
+    // card.
+    let chroot = read("provisioning/pi-gen/stage-lpframe/00-lpframe/01-run-chroot.sh");
+    assert!(
+        chroot.contains("provisioning/install.sh") && chroot.contains("--skip-lpframe"),
+        "the image stage no longer runs install.sh"
+    );
+    assert!(
+        chroot.contains("--yes"),
+        "nothing in an image build can answer a prompt"
+    );
+
+    // Everything install.sh needs must actually be staged into the rootfs.
+    let build = read("provisioning/pi-gen/build-image.sh");
+    for needed in [
+        "install.sh",
+        "config.toml",
+        "placeholder.png",
+        "lpframe.tmpfiles.conf",
+        "lpframe-rw",
+        "lpframe-ro",
+        "make-writable-partition.sh",
+    ] {
+        assert!(
+            build.contains(needed),
+            "build-image.sh does not stage {needed}, which install.sh installs"
+        );
+    }
+}
+
+#[test]
+fn the_image_refuses_to_let_the_root_partition_expand() {
+    // The image ships a data partition immediately after root. A first-boot
+    // resize would run straight into it. The trigger is one bare word in
+    // cmdline.txt — see resize_early in raspberrypi-sys-mods — and the stage
+    // both removes it and asserts it is gone, because a silent failure here
+    // costs somebody their settings partition.
+    let chroot = read("provisioning/pi-gen/stage-lpframe/00-lpframe/01-run-chroot.sh");
+    assert!(
+        chroot.contains("cmdline.txt"),
+        "the stage does not touch cmdline.txt"
+    );
+    assert!(
+        chroot.contains("s/ resize\\b//g"),
+        "the stage no longer strips the resize token"
+    );
+    assert!(
+        chroot.contains("grep -q ' resize'"),
+        "the stage strips the resize token but does not check it worked"
+    );
+}
+
+#[test]
+fn the_image_bakes_in_no_credentials() {
+    // A hundred devices flashed from one image must not share a login.
+    let build = read("provisioning/pi-gen/build-image.sh");
+    for forbidden in ["FIRST_USER_PASS=", "ENABLE_SSH=1", "PUBKEY_SSH_FIRST_USER="] {
+        assert!(
+            !build.contains(forbidden),
+            "build-image.sh sets {forbidden}, which bakes a credential into every card"
+        );
+    }
+    let chroot = read("provisioning/pi-gen/stage-lpframe/00-lpframe/01-run-chroot.sh");
+    assert!(
+        chroot.contains("web-password.txt"),
+        "nothing checks that the build did not generate a web password"
+    );
+}
+
+#[test]
+fn pi_gen_is_pinned_to_a_commit() {
+    // Not a branch. An image build that follows someone else's default
+    // branch is not reproducible, and "it built differently today" is not a
+    // thing to discover from a flashed card.
+    let build = read("provisioning/pi-gen/build-image.sh");
+    let pinned = build
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("PI_GEN_REF=\"${PI_GEN_REF:-"))
+        .and_then(|rest| rest.split('}').next())
+        .expect("PI_GEN_REF is not set the way this test expects");
+    assert_eq!(pinned.len(), 40, "not a full commit sha: {pinned:?}");
+    assert!(
+        pinned.chars().all(|c| c.is_ascii_hexdigit()),
+        "not a commit sha: {pinned:?}"
+    );
+}
+
+#[test]
+fn the_stage_scripts_pi_gen_must_execute_are_executable() {
+    // pi-gen runs NN-run.sh only if it has the executable bit, and otherwise
+    // logs one "Skip ... (not executable)" line among thousands and produces
+    // an image with none of our software in it.
+    use std::os::unix::fs::PermissionsExt;
+    for script in [
+        "provisioning/pi-gen/build-image.sh",
+        "provisioning/pi-gen/add-data-partition.sh",
+        "provisioning/pi-gen/stage-lpframe/prerun.sh",
+        "provisioning/pi-gen/stage-lpframe/00-lpframe/00-run.sh",
+    ] {
+        let mode = std::fs::metadata(repo_root().join(script))
+            .unwrap_or_else(|e| panic!("{script}: {e}"))
+            .permissions()
+            .mode();
+        assert_ne!(mode & 0o111, 0, "{script} is not executable");
+    }
+
+    // 01-run-chroot.sh is piped into the chroot rather than executed, so its
+    // mode does not matter — but it must exist.
+    assert!(repo_root()
+        .join("provisioning/pi-gen/stage-lpframe/00-lpframe/01-run-chroot.sh")
+        .is_file());
+}
+
+#[test]
+fn the_device_build_leaves_out_the_desktop_backend() {
+    // backend-sdl2 is a default feature and the development backend. Linking
+    // it pulls X11, Wayland, PulseAudio, ALSA and the libsndfile codecs into
+    // a Lite image that has none of them — fifty shared libraries instead of
+    // nine, for a window the device never opens.
+    let deb = read("provisioning/build-deb.sh");
+    assert!(
+        deb.contains("--no-default-features") && deb.contains("backend-drm"),
+        "build-deb.sh no longer restricts the renderer's features"
+    );
+    assert!(
+        !deb.contains("cargo build --release --workspace"),
+        "a whole-workspace release build brings backend-sdl2 back"
+    );
+
+    // And the declared dependencies must agree. The Depends line only, not
+    // the whole file — "libgpiod" appears in the comment explaining why it
+    // is not there, and a test that cannot tell those apart is worse than no
+    // test.
+    let depends = deb
+        .lines()
+        .find(|l| l.starts_with("Depends: "))
+        .expect("build-deb.sh has no Depends line");
+    for absent in ["libsdl2", "libgpiod", "libasound", "libpulse", "libx11"] {
+        assert!(
+            !depends.to_ascii_lowercase().contains(absent),
+            "the package still depends on {absent}: {depends}"
+        );
+    }
+    // libgl1-mesa-dri is invisible to ldd — Mesa dlopens the Gallium driver
+    // — so nothing but this notices if it is dropped, and the symptom is a
+    // renderer that cannot create a GL context.
+    assert!(
+        depends.contains("libgl1-mesa-dri"),
+        "the renderer needs Mesa's DRI drivers at runtime: {depends}"
+    );
+}
+
 #[test]
 fn the_free_space_parser_reads_the_extent_and_not_the_header() {
     // `sfdisk --list-free` puts a "Start End Sectors Size" header above the

@@ -228,9 +228,11 @@ APT_RUNTIME=(
     alsa-utils
     avahi-daemon
     ca-certificates
-    libgpiod2
-    # gpiodetect and gpioset — how docs/BUILD.md has you test the trigger
-    # before trusting it with an amplifier.
+    # gpiodetect and friends, for inspecting the trigger line by hand.
+    # Nothing of ours links libgpiod — artd drives the character device
+    # through gpiocdev, in Rust — so this is for the operator, not the
+    # daemon. The library package these pull in is libgpiod3 on trixie and
+    # libgpiod2 on bookworm, which is exactly why neither is named here.
     "gpiod|libgpiod-utils"
     # The 64-bit-time_t transition renamed this between bookworm and trixie,
     # and bookworm is a release this installer claims to support.
@@ -693,22 +695,59 @@ add_custom_mode() {
 
 # --- services ---------------------------------------------------------------
 
+UNITS=(nqptp.service lpframe-artd.service shairport-sync.service lpframe-lprender.service)
+
 enable_services() {
     step "Enabling services"
     if [[ $DO_ENABLE -eq 0 ]]; then
         skip "--no-enable"
         return
     fi
-    run systemctl enable --now avahi-daemon.service
-    for unit in nqptp.service lpframe-artd.service shairport-sync.service lpframe-lprender.service; do
+
+    # `systemctl enable` is a filesystem operation and systemctl knows to do
+    # it offline when it detects a chroot, so this half works during an image
+    # build. Starting anything does not, and must not be attempted: there is
+    # no init to talk to, and the image is not the machine that will run it.
+    for unit in avahi-daemon.service "${UNITS[@]}"; do
         run systemctl enable "$unit"
     done
+
+    if ! systemd_running; then
+        ok "enabled; not started (no running systemd here)"
+        info "they come up at the next boot"
+        return
+    fi
+
     # Started in dependency order by systemd, but named here in the order
     # they matter so a failure reads sensibly in the log.
+    run systemctl start avahi-daemon.service
     run systemctl restart lpframe-artd.service
     run systemctl restart nqptp.service shairport-sync.service
     run systemctl restart lpframe-lprender.service
     ok "enabled and started"
+}
+
+# Whether there is an init to talk to, as opposed to merely a systemctl
+# binary. False inside a pi-gen chroot and inside most containers.
+systemd_running() {
+    [[ -d /run/systemd/system ]]
+}
+
+# Ask the daemon whether it accepts what we just wrote.
+#
+# Worth doing during an image build too: a configuration that fails to parse
+# would otherwise be discovered by the first person to flash the card.
+check_config() {
+    [[ -x "$BIN_DIR/artd" ]] || return 0
+    if "$BIN_DIR/artd" --config "$CONF_DIR/config.toml" \
+        --config-local "$STATE_DIR/config.local.toml" --check-config >/dev/null 2>&1; then
+        ok "configuration is valid"
+        return 0
+    fi
+    warn "artd rejects the configuration:"
+    "$BIN_DIR/artd" --config "$CONF_DIR/config.toml" \
+        --config-local "$STATE_DIR/config.local.toml" --check-config || true
+    return 1
 }
 
 verify() {
@@ -717,9 +756,16 @@ verify() {
         skip "dry run"
         return
     fi
+    if ! systemd_running; then
+        # An image build. `artd --check-config` below is still worth running,
+        # but nothing is or should be active.
+        skip "no running systemd; nothing to have started"
+        check_config
+        return
+    fi
 
     local failed=0
-    for unit in nqptp.service lpframe-artd.service shairport-sync.service lpframe-lprender.service; do
+    for unit in "${UNITS[@]}"; do
         if systemctl is-active --quiet "$unit"; then
             ok "$unit"
         else
@@ -728,17 +774,7 @@ verify() {
         fi
     done
 
-    if [[ -x "$BIN_DIR/artd" ]]; then
-        if "$BIN_DIR/artd" --config "$CONF_DIR/config.toml" \
-            --config-local "$STATE_DIR/config.local.toml" --check-config >/dev/null 2>&1; then
-            ok "configuration is valid"
-        else
-            warn "artd rejects the configuration:"
-            "$BIN_DIR/artd" --config "$CONF_DIR/config.toml" \
-                --config-local "$STATE_DIR/config.local.toml" --check-config || true
-            failed=1
-        fi
-    fi
+    check_config || failed=1
 
     local password="$STATE_DIR/web-password.txt"
     if [[ -f "$password" ]]; then

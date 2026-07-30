@@ -58,13 +58,27 @@ case "${TARGET:-$(uname -m)}" in
     *) echo "unsupported target ${TARGET:-$(uname -m)}" >&2; exit 1 ;;
 esac
 
+# The renderer is built WITHOUT backend-sdl2, which is a default feature.
+#
+# SDL2 is the development backend — a window on a desktop. Linking it drags
+# in X11, Wayland, PulseAudio, ALSA, dbus and the audio codecs behind
+# libsndfile: fifty shared libraries instead of nine, none of which exist on
+# a Raspberry Pi OS Lite image, all of which apt would then have to install
+# onto an appliance that has no desktop and never opens a window.
+LPRENDER_FEATURES=(--no-default-features --features backend-drm)
+
 if [[ $BUILD -eq 1 ]]; then
     echo "building lpframe $VERSION for $ARCH"
+    target_args=()
+    [[ -n "$TARGET" ]] && target_args=(--target "$TARGET")
+    (
+        cd "$REPO_ROOT"
+        cargo build --release "${target_args[@]}" -p artd -p lpctl
+        cargo build --release "${target_args[@]}" -p lprender "${LPRENDER_FEATURES[@]}"
+    )
     if [[ -n "$TARGET" ]]; then
-        (cd "$REPO_ROOT" && cargo build --release --workspace --target "$TARGET")
         BINARY_DIR="${BINARY_DIR:-$REPO_ROOT/target/$TARGET/release}"
     else
-        (cd "$REPO_ROOT" && cargo build --release --workspace)
         BINARY_DIR="${BINARY_DIR:-$REPO_ROOT/target/release}"
     fi
 fi
@@ -114,6 +128,17 @@ echo "/etc/lpframe/config.toml" >"$STAGE/DEBIAN/conffiles"
 
 INSTALLED_KB="$(du -ks "$STAGE" | cut -f1)"
 
+# Depends is what the binaries actually link, checked with ldd, plus one
+# thing ldd cannot see: libgl1-mesa-dri holds the Gallium drivers Mesa opens
+# with dlopen at runtime. Without it EGL initialises against no driver and
+# the renderer fails at the first context creation with nothing useful said.
+#
+# Deliberately absent: libgpiod. artd talks to /dev/gpiochip* through
+# gpiocdev, which implements the character-device ioctls in Rust and links
+# nothing. An earlier draft required libgpiod2, which does not exist in
+# trixie at all — it ships libgpiod 2.x as libgpiod3 — so the package would
+# simply have refused to install. The gpiod tools are a Recommends because
+# docs/BUILD.md uses them to test a trigger, not because anything links them.
 cat >"$STAGE/DEBIAN/control" <<EOF
 Package: lpframe
 Version: $VERSION
@@ -122,8 +147,8 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: LP Frame <nobody@localhost>
 Installed-Size: $INSTALLED_KB
-Depends: libc6, libgcc-s1, adduser, systemd, libgpiod2, libegl1, libgles2, libgbm1, libdrm2
-Recommends: shairport-sync, avahi-daemon, alsa-utils, raspi-config
+Depends: libc6, libgcc-s1, adduser, systemd, libegl1, libgbm1, libdrm2, libgl1-mesa-dri
+Recommends: shairport-sync, avahi-daemon, alsa-utils, raspi-config, gpiod
 Description: Album art frame for AirPlay
  A vinyl-LP-sized wall display that shows the cover art of whatever is
  currently AirPlaying to it, and nothing else. Renders full-bleed on
